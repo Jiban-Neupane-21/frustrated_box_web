@@ -15,21 +15,36 @@ import { PlatformAdminBar } from "./components/platform-admin-bar";
 interface NavbarProps {
   session?: UserSession | null;
   onOpenCreateModal?: (type: CreateActionType) => void;
+  navMode?: NavMode;
+  activeCommunity?: string;
+  onSwitchMode?: (mode: NavMode, communitySlug?: string) => void;
 }
 
-export function Navbar({ session = null }: NavbarProps) {
+export function Navbar({
+  session = null,
+  navMode: controlledNavMode,
+  activeCommunity: controlledActiveCommunity,
+  onSwitchMode: controlledOnSwitchMode,
+}: NavbarProps) {
   const pathname = usePathname();
-  const [navMode, setNavMode] = useState<NavMode>("consumer");
-  const [activeCommunity, setActiveCommunity] = useState<string>("");
+  const [localNavMode, setLocalNavMode] = useState<NavMode>("consumer");
+  const [localActiveCommunity, setLocalActiveCommunity] = useState<string>("");
+
+  const navMode = controlledNavMode ?? localNavMode;
+  const activeCommunity = controlledActiveCommunity ?? localActiveCommunity;
 
   // Handles switching into and out of community moderation mode
   const handleSwitchMode = (mode: NavMode, communitySlug?: string) => {
-    setNavMode(mode);
-    if (communitySlug) setActiveCommunity(communitySlug);
+    if (controlledOnSwitchMode) {
+      controlledOnSwitchMode(mode, communitySlug);
+    } else {
+      setLocalNavMode(mode);
+      if (communitySlug) setLocalActiveCommunity(communitySlug);
+    }
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-zinc-800/80 bg-[#050505]/80 backdrop-blur-md">
+    <header className="sticky top-0 z-50 w-full border-b border-zinc-800/80 bg-[#050505]/80 backdrop-blur-md lg:hidden">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
         {navMode === "community-admin" ? (
           /* Dedicated Community Moderator Bar */
