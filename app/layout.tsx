@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Navbar } from "@/components/layout/navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,18 +14,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Frustrated Box",
+  title: "Frustrated Box | Let It Out",
   description:
-    "Frustrate Box is a platform where you can share, explore, and manage your thoughts, ideas, and experiences.",
+    "An anonymous venting platform to release frustrations, share thoughts, and explore relatable community rants.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-[#050505] text-zinc-100 selection:bg-red-900/60 selection:text-red-200">
+        {/* Sticky Modular Navigation */}
+        <Navbar />
+
+        {/* Main Content Area */}
+        <main className="flex-1 flex flex-col">{children}</main>
+      </body>
     </html>
   );
 }
