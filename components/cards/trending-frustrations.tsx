@@ -14,30 +14,7 @@ interface TrendingFrustrationsProps {
 }
 
 const DEFAULT_TRENDING_TAGS: TrendingTag[] = [
-  {
-    id: "1",
-    tag: "worklife",
-    description: "Corporate burnout & managers",
-    count: "2.4k",
-  },
-  {
-    id: "2",
-    tag: "mondayrage",
-    description: "Weekly start blues",
-    count: "1.8k",
-  },
-  {
-    id: "3",
-    tag: "traffic",
-    description: "Commute nightmares",
-    count: "950",
-  },
-  {
-    id: "4",
-    tag: "badcode",
-    description: "Legacy codebase fury",
-    count: "840",
-  },
+ 
 ];
 
 export function TrendingFrustrations({

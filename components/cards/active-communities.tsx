@@ -17,22 +17,7 @@ interface ActiveCommunitiesProps {
 }
 
 const DEFAULT_COMMUNITIES: CommunityItem[] = [
-  {
-    id: "1",
-    name: "c/tech-life",
-    slug: "tech-life",
-    initials: "TL",
-    members: "12k",
-    colorScheme: "amber",
-  },
-  {
-    id: "2",
-    name: "c/corporate-cage",
-    slug: "corporate-cage",
-    initials: "CC",
-    members: "8.5k",
-    colorScheme: "red",
-  },
+
 ];
 
 export function ActiveCommunities({
