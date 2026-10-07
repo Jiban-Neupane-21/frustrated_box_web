@@ -31,32 +31,7 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-[#050505] text-zinc-100 selection:bg-red-900/60 selection:text-red-200">
         {/* Responsive App Shell: Top Navbar for Mobile/Tablet, 3-Column for Desktop */}
-        <AppShell
-          session={{
-            id: "mod-1",
-            username: "tech_moderator",
-            displayName: "Alex Mercer",
-            role: "admin",
-            managedCommunities: [
-              {
-                id: "c1",
-                name: "Tech Life",
-                slug: "tech-life",
-                role: "moderator",
-                pendingReportsCount: 4, // पेन्डिङ रिपोर्ट ब्याज
-              },
-              {
-                id: "c2",
-                name: "Corporate Cage",
-                slug: "corporate-cage",
-                role: "owner",
-                pendingReportsCount: 0,
-              },
-            ],
-          }}
-        >
-          {children}
-        </AppShell>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
