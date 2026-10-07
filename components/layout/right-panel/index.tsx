@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { TrendingFrustrations } from "@/components/cards/trending-frustrations";
 import { ActiveCommunities } from "@/components/cards/active-communities";
-
 export function RightPanel() {
   return (
     <aside className="sticky top-0 hidden h-screen w-80 shrink-0 flex-col gap-4 overflow-y-auto px-4 py-4 xl:flex border-l border-zinc-900 bg-zinc-950/40">

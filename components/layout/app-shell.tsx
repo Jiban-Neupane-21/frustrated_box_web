@@ -73,11 +73,8 @@ export function AppShell({ children, session = null }: AppShellProps) {
           {children}
         </div>
 
-        {/* Right Column: Role-aware discovery & login panel (Desktop >= 1280px) */}
-        <RightPanel
-          session={session}
-          onSwitchMode={handleSwitchMode}
-        />
+        {/* Right Column: Trending & Discovery panel (Desktop >= 1280px) */}
+        <RightPanel />
       </div>
     </div>
   );
