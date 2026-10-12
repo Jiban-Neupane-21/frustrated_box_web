@@ -22,7 +22,6 @@ import { UserSession, NavMode } from "../navbar/types";
 import { CONSUMER_NAV_LINKS } from "../navbar/config/nav-links";
 import { PLATFORM_ADMIN_NAV_LINKS } from "../navbar/config/admin-nav";
 import { getCommunityModNavLinks } from "../navbar/config/community-mod-nav";
-import { LogoutConfirmModal } from "@/components/auth/LogoutConfirmModal";
 
 interface DesktopSidebarProps {
   session?: UserSession | null;
@@ -30,6 +29,7 @@ interface DesktopSidebarProps {
   navMode?: NavMode;
   activeCommunity?: string;
   onSwitchMode?: (mode: NavMode, communitySlug?: string) => void;
+  onRequestLogout?: () => void;
 }
 
 export function DesktopSidebar({
@@ -38,13 +38,12 @@ export function DesktopSidebar({
   navMode = "consumer",
   activeCommunity = "",
   onSwitchMode,
+  onRequestLogout,
 }: DesktopSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Close user popup on outside click
   useEffect(() => {
@@ -71,6 +70,16 @@ export function DesktopSidebar({
   );
   const activeCommunityPendingCount =
     activeManagedCommunity?.pendingReportsCount || 0;
+
+  // १. मोडरेटर वा ओनर भएका कम्युनिटीहरू (Mod Workspace)
+  const modCommunities =
+    session?.managedCommunities?.filter(
+      (c) => c.role === "moderator" || c.role === "owner",
+    ) ?? [];
+
+  // २. साधारण सदस्य मात्र भएका कम्युनिटीहरू (Joined Communities)
+  const joinedCommunities =
+    session?.managedCommunities?.filter((c) => c.role === "member") ?? [];
 
   // Determine which navigation links to display based on active navMode
   const isPlatformAdmin = navMode === "platform-admin";
@@ -226,56 +235,69 @@ export function DesktopSidebar({
           })}
         </nav>
 
-        {/* Primary CTA: Drop a Vent (Visible in consumer view) */}
-        {!isPlatformAdmin && !isCommunityAdmin && (
-          <div className="mt-1 px-1">
-            <button
-              type="button"
-              onClick={handleCreate}
-              className="group relative flex w-full items-center justify-center gap-2 rounded-xl border border-red-700/60 bg-linear-to-r from-red-600 to-red-700 px-4 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all hover:border-red-500 hover:from-red-500 hover:to-red-600 hover:shadow-[0_0_25px_rgba(220,38,38,0.5)] active:scale-[0.98]"
-            >
-              <Flame className="h-4 w-4 animate-pulse text-amber-300" />
-              <span>Drop a Vent</span>
-            </button>
+        {/* Mod Workspaces (only moderator and admin of community
+        ) */}
+        {!isPlatformAdmin && !isCommunityAdmin && modCommunities.length > 0 && (
+          <div className="mt-2 border-t border-zinc-800/80 pt-3">
+            <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-500">
+              Mod Workspaces
+            </p>
+            <div className="flex flex-col gap-1">
+              {modCommunities.map((comm) => (
+                <button
+                  key={comm.id}
+                  type="button"
+                  onClick={() => onSwitchMode?.("community-admin", comm.slug)}
+                  className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <Shield className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    <span className="truncate">c/{comm.slug}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {comm.pendingReportsCount &&
+                    comm.pendingReportsCount > 0 ? (
+                      <span className="rounded-full bg-red-950 px-1.5 py-0.2 text-[9px] font-bold text-red-400 border border-red-800/60">
+                        {comm.pendingReportsCount}
+                      </span>
+                    ) : (
+                      <span className="rounded bg-amber-950/40 px-1.5 py-0.5 text-[9px] text-amber-400 border border-amber-900/30">
+                        Mod
+                      </span>
+                    )}
+                    <ArrowRightLeft className="h-3 w-3 text-zinc-600 group-hover:text-zinc-400 transition" />
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Community Moderator Workspaces (Visible in consumer view if user moderates communities) */}
+        {/* Joined Communities (normal member of the communities) */}
         {!isPlatformAdmin &&
           !isCommunityAdmin &&
-          session &&
-          session.managedCommunities &&
-          session.managedCommunities.length > 0 && (
+          joinedCommunities.length > 0 && (
             <div className="mt-2 border-t border-zinc-800/80 pt-3">
-              <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-500">
-                Mod Workspaces
+              <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                Joined Communities
               </p>
               <div className="flex flex-col gap-1">
-                {session.managedCommunities.map((comm) => (
-                  <button
+                {joinedCommunities.map((comm) => (
+                  <Link
                     key={comm.id}
-                    type="button"
-                    onClick={() => onSwitchMode?.("community-admin", comm.slug)}
-                    className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left"
+                    href={`/c/${comm.slug}`}
+                    className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold text-zinc-400 transition hover:bg-zinc-900 hover:text-white text-left"
                   >
                     <div className="flex items-center gap-2 truncate">
-                      <Shield className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      <span className="text-zinc-500 group-hover:text-zinc-300">
+                        #
+                      </span>
                       <span className="truncate">c/{comm.slug}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      {comm.pendingReportsCount &&
-                      comm.pendingReportsCount > 0 ? (
-                        <span className="rounded-full bg-red-950 px-1.5 py-0.2 text-[9px] font-bold text-red-400 border border-red-800/60">
-                          {comm.pendingReportsCount}
-                        </span>
-                      ) : (
-                        <span className="rounded bg-amber-950/40 px-1.5 py-0.5 text-[9px] text-amber-400 border border-amber-900/30">
-                          Mod
-                        </span>
-                      )}
-                      <ArrowRightLeft className="h-3 w-3 text-zinc-600 group-hover:text-zinc-400 transition" />
-                    </div>
-                  </button>
+                    <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400">
+                      View
+                    </span>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -364,34 +386,53 @@ export function DesktopSidebar({
                   <span>Saved Posts</span>
                 </Link>
 
-                {/* Mod Workspaces in popup */}
-                {session.managedCommunities &&
-                  session.managedCommunities.length > 0 && (
-                    <div className="mt-1 border-t border-zinc-800/80 pt-1">
-                      <p className="px-2.5 py-1 text-[9px] font-bold text-amber-500 uppercase">
-                        Mod Workspace
-                      </p>
-                      {session.managedCommunities.map((comm) => (
-                        <button
-                          key={comm.id}
-                          type="button"
-                          onClick={() => {
-                            setIsMenuOpen(false);
-                            onSwitchMode?.("community-admin", comm.slug);
-                          }}
-                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left"
-                        >
-                          <span className="truncate">c/{comm.slug}</span>
-                          {comm.pendingReportsCount &&
-                          comm.pendingReportsCount > 0 ? (
-                            <span className="rounded bg-red-950 px-1 py-0.2 text-[9px] font-bold text-red-400">
-                              {comm.pendingReportsCount}
-                            </span>
-                          ) : null}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                {/* Mod Workspaces in popup (केवल Moderator / Owner का लागि) */}
+                {modCommunities.length > 0 && (
+                  <div className="mt-1 border-t border-zinc-800/80 pt-1">
+                    <p className="px-2.5 py-1 text-[9px] font-bold text-amber-500 uppercase">
+                      Mod Workspace
+                    </p>
+                    {modCommunities.map((comm) => (
+                      <button
+                        key={comm.id}
+                        type="button"
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          onSwitchMode?.("community-admin", comm.slug);
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left cursor-pointer"
+                      >
+                        <span className="truncate">c/{comm.slug}</span>
+                        {comm.pendingReportsCount &&
+                        comm.pendingReportsCount > 0 ? (
+                          <span className="rounded bg-red-950 px-1 py-0.2 text-[9px] font-bold text-red-400">
+                            {comm.pendingReportsCount}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Joined Communities in popup (साधारण Member का लागि) */}
+                {joinedCommunities.length > 0 && (
+                  <div className="mt-1 border-t border-zinc-800/80 pt-1">
+                    <p className="px-2.5 py-1 text-[9px] font-bold text-zinc-500 uppercase">
+                      My Communities
+                    </p>
+                    {joinedCommunities.map((comm) => (
+                      <Link
+                        key={comm.id}
+                        href={`/c/${comm.slug}`}
+                        onClick={() => setIsMenuOpen(false)}
+                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 transition hover:bg-zinc-900 hover:text-white text-left"
+                      >
+                        <span className="truncate">c/{comm.slug}</span>
+                        <span className="text-[10px] text-zinc-600">View</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
 
                 {/* Admin Console in popup */}
                 {session.role === "admin" && (
@@ -424,7 +465,7 @@ export function DesktopSidebar({
                     type="button"
                     onClick={() => {
                       setIsMenuOpen(false);
-                      setIsLogoutModalOpen(true);
+                      onRequestLogout?.();
                     }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-zinc-400 transition hover:bg-red-950/40 hover:text-red-400 text-left cursor-pointer"
                   >
@@ -461,12 +502,6 @@ export function DesktopSidebar({
           </div>
         )}
       </div>
-
-      {/* Centralized Logout Modal outside menu popup */}
-      <LogoutConfirmModal
-        open={isLogoutModalOpen}
-        onOpenChange={setIsLogoutModalOpen}
-      />
     </aside>
   );
 }

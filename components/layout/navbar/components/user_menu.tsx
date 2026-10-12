@@ -16,12 +16,11 @@ import {
   X,
 } from "lucide-react";
 import { UserSession, NavMode } from "../types";
-import { LogoutConfirmModal } from "@/components/auth/LogoutConfirmModal";
 
 interface UserDropdownProps {
   session: UserSession;
   onSwitchMode: (mode: NavMode, communitySlug?: string) => void;
-  onLogout?: () => void;
+  onRequestLogout?: () => void;
 }
 
 /* Mobile: icon only, centered. sm+: icon + label row */
@@ -62,9 +61,20 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
+export function UserDropdown({
+  session,
+  onSwitchMode,
+  onRequestLogout,
+}: UserDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+
+  const modCommunities =
+    session?.managedCommunities?.filter(
+      (c) => c.role === "moderator" || c.role === "owner",
+    ) ?? [];
+
+  const joinedCommunities =
+    session?.managedCommunities?.filter((c) => c.role === "member") ?? [];
 
   // Portal needs `document`: false on the server, true in the browser
   const mounted = useSyncExternalStore(
@@ -217,10 +227,11 @@ export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
           </Link>
 
           {/* Community workspaces */}
-          {session.managedCommunities.length > 0 && (
+          {/* Moderator Workspaces (केवल Mod / Owner का लागि) */}
+          {modCommunities.length > 0 && (
             <div className="mt-2 border-t border-zinc-800/80 pt-2 sm:pt-0">
-              <SectionLabel>Community Workspace</SectionLabel>
-              {session.managedCommunities.map((comm) => {
+              <SectionLabel>Mod Workspace</SectionLabel>
+              {modCommunities.map((comm) => {
                 const pending = comm.pendingReportsCount ?? 0;
                 return (
                   <button
@@ -240,21 +251,40 @@ export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
                     <span className="hidden min-w-0 flex-1 truncate sm:inline">
                       c/{comm.slug}
                     </span>
-
                     {pending > 0 && (
-                      <>
-                        {/* Mobile: red dot on the icon corner */}
-                        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-600 ring-2 ring-[#09090b] sm:hidden" />
-                        {/* sm+: number pill */}
-                        <span className="hidden rounded-full border border-red-800/60 bg-red-950 px-1.5 py-px text-[10px] font-bold text-red-400 sm:inline">
-                          {pending}
-                        </span>
-                      </>
+                      <span className="hidden rounded-full border border-red-800/60 bg-red-950 px-1.5 py-px text-[10px] font-bold text-red-400 sm:inline">
+                        {pending}
+                      </span>
                     )}
                     <ChevronRight className={chevron} />
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Joined Communities (साधारण Member का लागि) */}
+          {joinedCommunities.length > 0 && (
+            <div className="mt-2 border-t border-zinc-800/80 pt-2 sm:pt-0">
+              <SectionLabel>Joined Communities</SectionLabel>
+              {joinedCommunities.map((comm) => (
+                <Link
+                  key={comm.id}
+                  href={`/c/${comm.slug}`}
+                  onClick={close}
+                  aria-label={`c/${comm.slug}`}
+                  title={`c/${comm.slug}`}
+                  className={`${itemBase} text-zinc-400 hover:bg-zinc-900 hover:text-white`}
+                >
+                  <IconBox>
+                    <span className="text-xs font-bold text-zinc-500">#</span>
+                  </IconBox>
+                  <span className="hidden min-w-0 flex-1 truncate sm:inline">
+                    c/{comm.slug}
+                  </span>
+                  <ChevronRight className={chevron} />
+                </Link>
+              ))}
             </div>
           )}
 
@@ -302,8 +332,8 @@ export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
           <button
             type="button"
             onClick={() => {
-              close(); 
-              setIsLogoutModalOpen(true);
+              close();
+              onRequestLogout?.();
             }}
             aria-label="Sign Out"
             title="Sign Out"
@@ -333,12 +363,6 @@ export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
       </button>
 
       {mounted && createPortal(drawer, document.body)}
-
-      {/* Mobile/Tablet Controlled Confirmation Modal */}
-      <LogoutConfirmModal
-        open={isLogoutModalOpen}
-        onOpenChange={setIsLogoutModalOpen}
-      />
     </>
   );
 }
