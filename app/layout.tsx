@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
+import { AuthProvider } from "@/components/AuthContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +32,9 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-[#050505] text-zinc-100 selection:bg-red-900/60 selection:text-red-200">
         {/* Responsive App Shell: Top Navbar for Mobile/Tablet, 3-Column for Desktop */}
-        <AppShell>{children}</AppShell>
+        <AuthProvider>
+          <AppShell>{children}</AppShell>
+        </AuthProvider>
       </body>
     </html>
   );

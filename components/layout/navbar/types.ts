@@ -71,7 +71,9 @@ export interface ManagedCommunity {
  */
 export interface UserSession {
   id: string;
+  name: string;
   username: string;
+  email: string;
   displayName?: string;
   avatarUrl?: string;
   role: GlobalRole;

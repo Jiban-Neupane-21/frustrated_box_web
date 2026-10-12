@@ -18,6 +18,7 @@ interface NavbarProps {
   navMode?: NavMode;
   activeCommunity?: string;
   onSwitchMode?: (mode: NavMode, communitySlug?: string) => void;
+  onRequestLogout?: () => void;
 }
 
 export function Navbar({
@@ -25,6 +26,7 @@ export function Navbar({
   navMode: controlledNavMode,
   activeCommunity: controlledActiveCommunity,
   onSwitchMode: controlledOnSwitchMode,
+  onRequestLogout,
 }: NavbarProps) {
   const pathname = usePathname();
   const [localNavMode, setLocalNavMode] = useState<NavMode>("consumer");
@@ -112,6 +114,7 @@ export function Navbar({
                   <UserDropdown
                     session={session}
                     onSwitchMode={handleSwitchMode}
+                    onRequestLogout={onRequestLogout}
                   />
                 </div>
               ) : (

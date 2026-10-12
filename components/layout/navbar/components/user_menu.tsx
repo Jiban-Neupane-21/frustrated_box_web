@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { UserSession, NavMode } from "../types";
+import { LogoutConfirmModal } from "@/components/auth/LogoutConfirmModal";
 
 interface UserDropdownProps {
   session: UserSession;
@@ -61,12 +62,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function UserDropdown({
-  session,
-  onSwitchMode,
-  onLogout,
-}: UserDropdownProps) {
+export function UserDropdown({ session, onSwitchMode }: UserDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Portal needs `document`: false on the server, true in the browser
   const mounted = useSyncExternalStore(
@@ -304,14 +302,14 @@ export function UserDropdown({
           <button
             type="button"
             onClick={() => {
-              close();
-              onLogout?.();
+              close(); 
+              setIsLogoutModalOpen(true);
             }}
             aria-label="Sign Out"
             title="Sign Out"
-            className={`${itemBase} text-zinc-400 hover:bg-red-500/10 hover:text-red-400`}
+            className={`${itemBase} text-zinc-400 hover:bg-red-500/10 hover:text-red-400 cursor-pointer min-h-11`}
           >
-            <IconBox>
+            <IconBox tone="red">
               <LogOut className="h-4 w-4" />
             </IconBox>
             <span className="hidden sm:inline">Sign Out</span>
@@ -335,6 +333,12 @@ export function UserDropdown({
       </button>
 
       {mounted && createPortal(drawer, document.body)}
+
+      {/* Mobile/Tablet Controlled Confirmation Modal */}
+      <LogoutConfirmModal
+        open={isLogoutModalOpen}
+        onOpenChange={setIsLogoutModalOpen}
+      />
     </>
   );
 }

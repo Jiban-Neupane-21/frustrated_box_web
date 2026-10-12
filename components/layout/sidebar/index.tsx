@@ -22,6 +22,7 @@ import { UserSession, NavMode } from "../navbar/types";
 import { CONSUMER_NAV_LINKS } from "../navbar/config/nav-links";
 import { PLATFORM_ADMIN_NAV_LINKS } from "../navbar/config/admin-nav";
 import { getCommunityModNavLinks } from "../navbar/config/community-mod-nav";
+import { LogoutConfirmModal } from "@/components/auth/LogoutConfirmModal";
 
 interface DesktopSidebarProps {
   session?: UserSession | null;
@@ -42,6 +43,8 @@ export function DesktopSidebar({
   const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Close user popup on outside click
   useEffect(() => {
@@ -64,9 +67,10 @@ export function DesktopSidebar({
 
   // Moderator community pending count for currently active community
   const activeManagedCommunity = session?.managedCommunities?.find(
-    (c) => c.slug === activeCommunity
+    (c) => c.slug === activeCommunity,
   );
-  const activeCommunityPendingCount = activeManagedCommunity?.pendingReportsCount || 0;
+  const activeCommunityPendingCount =
+    activeManagedCommunity?.pendingReportsCount || 0;
 
   // Determine which navigation links to display based on active navMode
   const isPlatformAdmin = navMode === "platform-admin";
@@ -106,8 +110,11 @@ export function DesktopSidebar({
   const currentNavLinks = isPlatformAdmin
     ? PLATFORM_ADMIN_NAV_LINKS
     : isCommunityAdmin
-    ? getCommunityModNavLinks(activeCommunity || "community", activeCommunityPendingCount)
-    : consumerNavLinks;
+      ? getCommunityModNavLinks(
+          activeCommunity || "community",
+          activeCommunityPendingCount,
+        )
+      : consumerNavLinks;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col justify-between border-r border-zinc-800/60 px-3 py-4 lg:flex xl:w-72">
@@ -121,7 +128,9 @@ export function DesktopSidebar({
                 <ShieldCheck className="h-5 w-5 text-red-500" />
                 <div>
                   <p className="text-xs font-bold text-white">Platform Admin</p>
-                  <p className="text-[10px] font-semibold text-red-400">Super Admin</p>
+                  <p className="text-[10px] font-semibold text-red-400">
+                    Super Admin
+                  </p>
                 </div>
               </div>
               <button
@@ -142,7 +151,9 @@ export function DesktopSidebar({
                   <p className="text-xs font-bold text-white truncate">
                     c/{activeCommunity || "community"}
                   </p>
-                  <p className="text-[10px] font-semibold text-amber-400">Mod Workspace</p>
+                  <p className="text-[10px] font-semibold text-amber-400">
+                    Mod Workspace
+                  </p>
                 </div>
               </div>
               <button
@@ -186,10 +197,10 @@ export function DesktopSidebar({
                   isActive
                     ? "bg-zinc-900 text-red-500 font-bold shadow-sm"
                     : isPlatformAdmin
-                    ? "text-zinc-300 hover:bg-red-950/20 hover:text-red-300"
-                    : isCommunityAdmin
-                    ? "text-zinc-300 hover:bg-amber-950/20 hover:text-amber-300"
-                    : "text-zinc-300 hover:bg-zinc-900/60 hover:text-white"
+                      ? "text-zinc-300 hover:bg-red-950/20 hover:text-red-300"
+                      : isCommunityAdmin
+                        ? "text-zinc-300 hover:bg-amber-950/20 hover:text-amber-300"
+                        : "text-zinc-300 hover:bg-zinc-900/60 hover:text-white"
                 }`}
               >
                 <div className="flex items-center gap-3.5">
@@ -198,8 +209,8 @@ export function DesktopSidebar({
                       isActive
                         ? "text-red-500"
                         : isAdminConsoleItem
-                        ? "text-red-400"
-                        : "text-zinc-400 group-hover:text-zinc-200"
+                          ? "text-red-400"
+                          : "text-zinc-400 group-hover:text-zinc-200"
                     }`}
                   />
                   <span>{item.label}</span>
@@ -252,7 +263,8 @@ export function DesktopSidebar({
                       <span className="truncate">c/{comm.slug}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      {comm.pendingReportsCount && comm.pendingReportsCount > 0 ? (
+                      {comm.pendingReportsCount &&
+                      comm.pendingReportsCount > 0 ? (
                         <span className="rounded-full bg-red-950 px-1.5 py-0.2 text-[9px] font-bold text-red-400 border border-red-800/60">
                           {comm.pendingReportsCount}
                         </span>
@@ -320,7 +332,9 @@ export function DesktopSidebar({
                       {session.role}
                     </span>
                   </div>
-                  <p className="text-[10px] text-zinc-500">@{session.username}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    @{session.username}
+                  </p>
                 </div>
 
                 <Link
@@ -351,31 +365,33 @@ export function DesktopSidebar({
                 </Link>
 
                 {/* Mod Workspaces in popup */}
-                {session.managedCommunities && session.managedCommunities.length > 0 && (
-                  <div className="mt-1 border-t border-zinc-800/80 pt-1">
-                    <p className="px-2.5 py-1 text-[9px] font-bold text-amber-500 uppercase">
-                      Mod Workspace
-                    </p>
-                    {session.managedCommunities.map((comm) => (
-                      <button
-                        key={comm.id}
-                        type="button"
-                        onClick={() => {
-                          setIsMenuOpen(false);
-                          onSwitchMode?.("community-admin", comm.slug);
-                        }}
-                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left"
-                      >
-                        <span className="truncate">c/{comm.slug}</span>
-                        {comm.pendingReportsCount && comm.pendingReportsCount > 0 ? (
-                          <span className="rounded bg-red-950 px-1 py-0.2 text-[9px] font-bold text-red-400">
-                            {comm.pendingReportsCount}
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {session.managedCommunities &&
+                  session.managedCommunities.length > 0 && (
+                    <div className="mt-1 border-t border-zinc-800/80 pt-1">
+                      <p className="px-2.5 py-1 text-[9px] font-bold text-amber-500 uppercase">
+                        Mod Workspace
+                      </p>
+                      {session.managedCommunities.map((comm) => (
+                        <button
+                          key={comm.id}
+                          type="button"
+                          onClick={() => {
+                            setIsMenuOpen(false);
+                            onSwitchMode?.("community-admin", comm.slug);
+                          }}
+                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 transition hover:bg-zinc-900 hover:text-amber-400 text-left"
+                        >
+                          <span className="truncate">c/{comm.slug}</span>
+                          {comm.pendingReportsCount &&
+                          comm.pendingReportsCount > 0 ? (
+                            <span className="rounded bg-red-950 px-1 py-0.2 text-[9px] font-bold text-red-400">
+                              {comm.pendingReportsCount}
+                            </span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                 {/* Admin Console in popup */}
                 {session.role === "admin" && (
@@ -404,14 +420,17 @@ export function DesktopSidebar({
                     <span>Settings</span>
                   </Link>
 
-                  <Link
-                    href="/api/auth/signout"
-                    onClick={() => setIsMenuOpen(false)}
-                    className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-zinc-400 transition hover:bg-red-950/40 hover:text-red-400"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      setIsLogoutModalOpen(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-zinc-400 transition hover:bg-red-950/40 hover:text-red-400 text-left cursor-pointer"
                   >
                     <LogOut className="h-3.5 w-3.5" />
                     <span>Sign Out</span>
-                  </Link>
+                  </button>
                 </div>
               </div>
             )}
@@ -419,7 +438,9 @@ export function DesktopSidebar({
         ) : (
           /* Guest Mini Card */
           <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-3">
-            <p className="text-xs font-semibold text-zinc-300">Got frustration?</p>
+            <p className="text-xs font-semibold text-zinc-300">
+              Got frustration?
+            </p>
             <p className="mt-0.5 text-[11px] text-zinc-500">
               Log in to save vents and join communities.
             </p>
@@ -440,6 +461,12 @@ export function DesktopSidebar({
           </div>
         )}
       </div>
+
+      {/* Centralized Logout Modal outside menu popup */}
+      <LogoutConfirmModal
+        open={isLogoutModalOpen}
+        onOpenChange={setIsLogoutModalOpen}
+      />
     </aside>
   );
 }
