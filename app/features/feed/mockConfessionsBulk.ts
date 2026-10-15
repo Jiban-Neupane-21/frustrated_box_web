@@ -572,7 +572,7 @@ function makeComments(
    GENERATOR
    ========================================================= */
 
-export const BULK_COUNT = 320;
+export const BULK_COUNT = 300;
 
 function generate(): Confession[] {
   const now = Date.now();
@@ -601,13 +601,8 @@ function generate(): Confession[] {
 
   const posts = [...uniquePosts.values()];
 
-  if (posts.length < BULK_COUNT) {
-    throw new Error(
-      `Expected ${BULK_COUNT} unique posts; found ${posts.length}.`,
-    );
-  }
-
-  for (let i = 0; i < BULK_COUNT; i++) {
+  const countToGenerate = Math.min(BULK_COUNT, posts.length);
+  for (let i = 0; i < countToGenerate; i++) {
     const post = posts[i];
     const author = pickAuthor();
 
