@@ -49,7 +49,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(null);
         setToken(null);
         router.refresh();
-        router.replace("/login");
+        router.replace("/");
       }
     };
 
@@ -113,7 +113,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       // Clear Next.js cache and redirect to login
       router.refresh();
-      router.replace("/login");
+      router.replace("/");
     }
   }, [token, purgeStorage, router]);
 

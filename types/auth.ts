@@ -46,6 +46,7 @@ export interface User {
   role: UserRole;
   profile?: UserProfileDetails; // optional profile details
   managedCommunities?: ManagedCommunity[];
+  following?: string[];
 }
 
 export interface AuthResponse {
