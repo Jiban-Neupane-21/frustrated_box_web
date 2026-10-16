@@ -6,7 +6,40 @@ import {
 } from "./types";
 
 // In-memory mutable store so user likes/burns persist across pagination in the current session
-let confessionsStore = [...MOCK_CONFESSIONS];
+// Reload गर्दा नयाँ random order — pure client-side store
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Session शुरु हुँदा एकपटक shuffle — IDs consistent रहन्छन्
+// Base data — नछुने
+const baseConfessions = [...MOCK_CONFESSIONS];
+
+// नयाँ थपिएका posts (session भित्र)
+const newPosts: (typeof MOCK_CONFESSIONS)[number][] = [];
+
+// हरेक fresh fetch को लागि current order
+let currentSessionOrder: (typeof MOCK_CONFESSIONS)[number][] = [];
+let confessionsStore = baseConfessions; // legacy reference (likes/burns को लागि)
+
+// Store sync helper
+function updateConfessionInStores(
+  id: string,
+  updater: (item: (typeof MOCK_CONFESSIONS)[number]) => (typeof MOCK_CONFESSIONS)[number],
+) {
+  const apply = (arr: (typeof MOCK_CONFESSIONS)[number][]) => {
+    const idx = arr.findIndex((c) => c.id === id);
+    if (idx !== -1) arr[idx] = updater(arr[idx]);
+  };
+  apply(confessionsStore);
+  apply(currentSessionOrder);
+  apply(newPosts);
+}
 
 /**
  * Fetch paginated confessions stream (simulates Hono GET /api/confessions)
@@ -14,12 +47,16 @@ let confessionsStore = [...MOCK_CONFESSIONS];
 export async function fetchFeed(
   params: FeedQueryParams = {},
 ): Promise<PaginatedFeedResponse> {
-  const { limit = 5, cursor = null, sort = "recent", tag = null } = params;
-
+  const { limit = 5, cursor = null, sort = "for_you", tag = null } = params;
   // Simulate network latency (450ms) to test loading skeletons
   await new Promise((resolve) => setTimeout(resolve, 450));
 
-  let filtered = [...confessionsStore];
+  // cursor नभएमा (fresh load / refresh) → नयाँ random shuffle गर्ने
+  if (!cursor) {
+    currentSessionOrder = [...newPosts, ...shuffleArray(baseConfessions)];
+  }
+
+  let filtered = [...currentSessionOrder];
 
   // 1. Dynamic Organic Tag Filter (e.g., #overtime, #exams)
   if (tag) {
@@ -33,20 +70,22 @@ export async function fetchFeed(
   const followedAuthors = getFollowedAuthorIds();
 
   if (sort === "following") {
-    // 🔒 केवल अनाम नभएका र फलो गरिएका लेखकहरूको पोस्ट मात्र फिल्टर गर्ने
-    filtered = filtered.filter(
-      (item) =>
-        !item.author.isAnonymous &&
-        followedAuthors.includes(item.author.id || item.author.alias),
-    );
-  } else {
-    filtered.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    );
+    // 🔒 केवल अनाम नभएका र फलो गरिएका लेखकहरूको पोस्ट मात्र फिल्टर गर्ने र नयाँ पहिला देखाउने
+    filtered = filtered
+      .filter(
+        (item) =>
+          !item.author.isAnonymous &&
+          followedAuthors.includes(item.author.id || item.author.alias),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
   }
+  // 👈 Note: "for_you" को लागि shuffle गरिएको random order नै कायम रहन्छ!
+  // मिति (createdAt) ले override गर्दैन, जसले गर्दा हरेक refresh मा नयाँ र्यान्डम पोस्टहरू देखिन्छन्।
 
-  // 3. Cursor-based Slicing
+  // 3. Cursor-based Slicing on `filtered`
   const startIndex = cursor
     ? filtered.findIndex((item) => item.id === cursor) + 1
     : 0;
@@ -91,11 +130,11 @@ export async function toggleRelate(
   const nextState = !item.isRelatableByMe;
   const nextCount = item.relateCount + (nextState ? 1 : -1);
 
-  confessionsStore[index] = {
-    ...item,
+  updateConfessionInStores(confessionId, (c) => ({
+    ...c,
     isRelatableByMe: nextState,
     relateCount: nextCount,
-  };
+  }));
 
   return {
     relateCount: nextCount,
@@ -118,11 +157,11 @@ export async function toggleBurn(
   const nextState = !item.isBurnedByMe;
   const nextCount = item.burnCount + (nextState ? 1 : -1);
 
-  confessionsStore[index] = {
-    ...item,
+  updateConfessionInStores(confessionId, (c) => ({
+    ...c,
     isBurnedByMe: nextState,
     burnCount: nextCount,
-  };
+  }));
 
   return {
     burnCount: nextCount,
@@ -155,16 +194,23 @@ export async function createConfession(
     createdAt: new Date().toISOString(),
   };
 
+  newPosts.unshift(newPost as (typeof MOCK_CONFESSIONS)[number]);
   confessionsStore = [newPost, ...confessionsStore];
+  currentSessionOrder = [
+    newPost as (typeof MOCK_CONFESSIONS)[number],
+    ...currentSessionOrder,
+  ];
 }
 
 /**
- * Append a new comment / echo to a confession
+ * Append a new comment or reply to an existing comment
  */
 export async function addComment(
   confessionId: string,
   content: string,
   authorAlias?: string,
+  parentId?: string,
+  replyToAlias?: string,
 ): Promise<ConfessionComment> {
   // Simulate network latency (250ms)
   await new Promise((resolve) => setTimeout(resolve, 250));
@@ -183,15 +229,32 @@ export async function addComment(
     },
     content: content.trim(),
     createdAt: new Date().toISOString(),
+    ...(parentId ? { parentId, replyToAlias } : {}),
   };
 
-  const updatedComments = [newComment, ...(confession.comments || [])];
+  let updatedComments: ConfessionComment[];
 
-  confessionsStore[index] = {
-    ...confession,
+  if (parentId) {
+    // 💬 यदि रिप्लाई हो भने प्यारेन्ट कमेन्ट भित्रको `replies` एरेमा थप्ने:
+    updatedComments = (confession.comments || []).map((c) => {
+      if (c.id === parentId) {
+        return {
+          ...c,
+          replies: [...(c.replies || []), newComment],
+        };
+      }
+      return c;
+    });
+  } else {
+    // 💬 साधारण नयाँ कमेन्ट हो भने मुख्य लिस्टको सुरुमा थप्ने:
+    updatedComments = [newComment, ...(confession.comments || [])];
+  }
+
+  updateConfessionInStores(confessionId, (c) => ({
+    ...c,
     comments: updatedComments,
-    echoCount: (confession.echoCount || 0) + 1,
-  };
+    echoCount: (c.echoCount || 0) + 1,
+  }));
 
   return newComment;
 }

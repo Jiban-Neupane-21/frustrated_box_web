@@ -66,6 +66,8 @@ export function ConfessionCard({
   const [copied, setCopied] = useState(false);
 
   const cardRef = useRef<HTMLDivElement>(null);
+  const commentInputRef = useRef<HTMLInputElement>(null);
+  const commentsSectionRef = useRef<HTMLDivElement>(null);
   const [sharing, setSharing] = useState(false);
 
   const [capturing, setCapturing] = useState(false);
@@ -78,7 +80,14 @@ export function ConfessionCard({
 
   // कमेन्ट खोल्ने/बन्द गर्ने र कतिवटा देखाउने स्टेट
   const [showComments, setShowComments] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(4);
+  const [commentPage, setCommentPage] = useState(0);
+  const PAGE_SIZE = 4;
+
+  // 💬 कसलाई रिप्लाई गर्न लागिएको हो (Reply State)
+  const [replyingTo, setReplyingTo] = useState<{
+    commentId: string;
+    authorAlias: string;
+  } | null>(null);
 
   const [commentsList, setCommentsList] = useState<ConfessionComment[]>(
     confession.comments || [],
@@ -89,12 +98,40 @@ export function ConfessionCard({
 
   // जम्मा कमेन्टहरू
   const allComments = commentsList || [];
-  const visibleComments = allComments.slice(0, visibleCount);
-  const hasMoreComments = allComments.length > visibleCount;
+  const visibleComments = allComments.slice(
+    commentPage * PAGE_SIZE,
+    (commentPage + 1) * PAGE_SIZE,
+  );
+  const hasMoreComments = (commentPage + 1) * PAGE_SIZE < allComments.length;
+  const hasPrevComments = commentPage > 0;
 
   // Toggle Function
   const toggleComments = () => {
-    setShowComments((prev) => !prev);
+    const newVal = !showComments;
+    setShowComments(newVal);
+    if (newVal) {
+      setTimeout(() => {
+        commentsSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }, 50);
+    }
+  };
+
+  // ↩️ Start Replying to a comment or sub-reply
+  const handleStartReply = (commentId: string, authorAlias: string) => {
+    setReplyingTo({ commentId, authorAlias });
+    if (!showComments) {
+      setShowComments(true);
+    }
+    setTimeout(() => {
+      commentInputRef.current?.focus();
+      commentInputRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 50);
   };
 
   // 🔖 Save / Bookmark Post Handler
@@ -164,9 +201,14 @@ export function ConfessionCard({
       });
     }
   };
-  // Load More Function (अर्को ४ वटा थप्ने)
+
+  // 🔽 कमेन्टहरूलाई फेरि सुरुको ४ वटामा झार्ने:
+  const handleShowLess = () => {
+    setCommentPage((prev) => prev - 1);
+  };
+
   const handleLoadMoreComments = () => {
-    setVisibleCount((prev) => prev + 4);
+    setCommentPage((prev) => prev + 1);
   };
 
   // 👥 Follow सम्बन्धी लजिक र स्टेट
@@ -206,33 +248,51 @@ export function ConfessionCard({
     }
   };
 
-  // 💬 कमेन्ट पोस्ट गर्ने ह्यान्डलर
-  // 💬 कमेन्ट पोस्ट गर्ने एउटै फङ्सन (लगइन भएको र Anonymous दुबैको लागि)
+  // 💬 कमेन्ट तथा रिप्लाई पोस्ट गर्ने ह्यान्डलर
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentText.trim() || isPostingComment) return;
 
     setIsPostingComment(true);
+
     try {
-      // यदि युजर लगइन छ भने उसको नाम, छैन भने Anonymous alias बन्नेछ:
       const authorAlias =
         isAuthenticated && user
           ? user.name || user.username
           : `Anonymous #${Math.floor(100 + Math.random() * 900)}`;
 
-      // API मा कमेन्ट पठाउने
+      // API मा कमेन्ट वा रिप्लाई पठाउने
       const newComment = await addComment(
         confession.id,
         commentText.trim(),
-        authorAlias, // 👈 यहाँ authorAlias पास भयो
+        authorAlias,
+        replyingTo?.commentId, // 👈 यदि रिप्लाई हो भने प्यारेन्ट ID
+        replyingTo?.authorAlias, // 👈 जसलाई रिप्लाई गरिएको हो उसको नाम
       );
 
-      // कमेन्ट लिस्टको सुरुमा तुरुन्तै थप्ने र काउन्टर १ ले बढाउने
-      setCommentsList((prev) => [newComment, ...prev]);
+      if (replyingTo) {
+        // 💬 प्यारेन्ट कमेन्टको `replies` भित्र रिप्लाई थप्ने:
+        setCommentsList((prev) =>
+          prev.map((c) =>
+            c.id === replyingTo.commentId
+              ? { ...c, replies: [...(c.replies || []), newComment] }
+              : c,
+          ),
+        );
+        setReplyingTo(null); // रिप्लाई मोड बन्द गर्ने
+      } else {
+        // 💬 नयाँ मुख्य कमेन्ट लिस्टमा थप्ने:
+        setCommentsList((prev) => [newComment, ...prev]);
+      }
+
       setEchoCount((prev) => prev + 1);
-      setCommentText(""); // इनपुट बक्स खाली गर्ने
+      setCommentText(""); // इनपुट खाली गर्ने
     } catch (err) {
       console.error("Failed to post comment:", err);
+      DarkToast.fire({
+        icon: "error",
+        title: "Failed to post echo",
+      });
     } finally {
       setIsPostingComment(false);
     }
@@ -526,7 +586,7 @@ export function ConfessionCard({
               key={tag}
               type="button"
               onClick={() => onTagClick?.(tag)}
-              className="rounded-full bg-zinc-900/80 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+              className=" px-2.5 py-0.5 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
             >
               #{tag}
             </button>
@@ -572,13 +632,15 @@ export function ConfessionCard({
             aria-pressed={isBurned}
             className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-medium transition-all duration-150 active:scale-95 ${
               isBurned
-                ? "bg-red-950/40 text-red-400 ring-1 ring-red-900/60"
+                ? "bg-amber-500/10 text-orange-400 ring-1 ring-orange-500/30 shadow-[0_0_12px_-2px_rgba(249,115,22,0.3)]"
                 : "hover:bg-zinc-900 hover:text-zinc-200"
             }`}
           >
             <Flame
               className={`h-4 w-4 transition-transform ${
-                isBurned ? "fill-red-600 stroke-red-600 scale-110" : ""
+                isBurned
+                  ? "fill-orange-500 stroke-orange-400 scale-110 drop-shadow-[0_0_6px_rgba(249,115,22,0.6)]"
+                  : ""
               }`}
             />
             <span>{burnCount}</span>
@@ -618,27 +680,54 @@ export function ConfessionCard({
       </div>{" "}
       {/* 💬 Echoes / Comments Section */}
       {showComments && (
-        <div className="mt-4 border-t border-zinc-900/80 pt-3 space-y-2.5 animate-in fade-in-50 duration-200">
+        <div
+          ref={commentsSectionRef}
+          className="mt-4 border-t border-zinc-900/80 pt-3 space-y-2.5 animate-in fade-in-50 duration-200"
+        >
+          {" "}
           <div className="flex items-center justify-between pb-1">
             <span className="text-xs font-semibold text-zinc-400">
               Echoes ({commentsList.length})
             </span>
             <span className="text-[11px] text-zinc-500">
-              Showing {Math.min(visibleCount, commentsList.length)} of{" "}
+              Showing {commentPage * PAGE_SIZE + 1}–
+              {Math.min((commentPage + 1) * PAGE_SIZE, commentsList.length)} of{" "}
               {commentsList.length}
             </span>
           </div>
-
+          {/* 🏷️ यदि कुनै कमेन्टलाई रिप्लाई गरिँदै छ भने देखाउने ब्यानर */}
+          {replyingTo && (
+            <div className="flex items-center justify-between rounded-lg bg-zinc-900/60 border border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-400 animate-in fade-in duration-150">
+              <span>
+                Replying to{" "}
+                <span className="font-medium text-red-400">
+                  @{replyingTo.authorAlias}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="text-zinc-500 hover:text-zinc-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {isAuthenticated ? (
             <form
               onSubmit={handlePostComment}
               className="flex items-center gap-2 pb-1"
             >
               <input
+                ref={commentInputRef}
                 type="text"
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Echo your thoughts..."
+                placeholder={
+                  replyingTo
+                    ? `Write a reply to @${replyingTo.authorAlias}...`
+                    : "Echo your thoughts..."
+                }
                 disabled={isPostingComment}
                 className="flex-1 rounded-lg border border-zinc-900 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:border-red-900/60 focus:outline-none focus:ring-1 focus:ring-red-900/60"
               />
@@ -666,10 +755,15 @@ export function ConfessionCard({
               >
                 <div className="relative min-w-0 flex-1">
                   <input
+                    ref={commentInputRef}
                     type="text"
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Echo anonymously..."
+                    placeholder={
+                      replyingTo
+                        ? `Reply as Ghost to @${replyingTo.authorAlias}...`
+                        : "Echo anonymously..."
+                    }
                     className="w-full rounded-lg bg-zinc-900/60 border border-zinc-800 px-3 py-2 pr-24 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500/50"
                   />
                   <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 select-none">
@@ -691,7 +785,6 @@ export function ConfessionCard({
               </form>
             </div>
           )}
-
           {commentsList.length === 0 ? (
             <p className="text-xs text-zinc-500 py-2">
               No echoes yet. Be the first to reply!
@@ -701,34 +794,127 @@ export function ConfessionCard({
               {visibleComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-lg border border-zinc-900 bg-zinc-900/40 p-2.5 text-xs sm:text-sm"
+                  className={`rounded-xl border p-3 sm:p-3.5 text-xs sm:text-sm transition-all duration-200 ${
+                    replyingTo?.commentId === comment.id
+                      ? "border-red-500/60 bg-red-950/20 ring-1 ring-red-500/30"
+                      : "border-zinc-900 bg-zinc-900/40 hover:bg-zinc-900/60"
+                  }`}
                 >
-                  <div className="mb-1 flex items-center justify-between text-xs text-zinc-500">
-                    <span className="font-medium text-zinc-300">
+                  {/* हेडर: नाम र समय */}
+                  <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+                    <span className="font-medium text-zinc-300 truncate">
                       {comment.author.alias}
                     </span>
-                    <span className="text-[10px]">
+                    <span className="text-[10px] sm:text-[11px] text-zinc-500 shrink-0 select-none">
                       {new Date(comment.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
                     </span>
                   </div>
-                  <p className="text-zinc-200 leading-relaxed">
+
+                  {/* कमेन्ट सामग्री */}
+                  <p className="mt-1.5 text-zinc-200 leading-relaxed text-xs sm:text-sm wrap-break-word whitespace-pre-wrap">
                     {comment.content}
                   </p>
+
+                  {/* 🔘 मोबाइल-फ्रेन्डली एक्सन बार: कमेन्टको ठीक मुनि */}
+                  <div className="mt-2.5 flex items-center gap-3 pt-1 border-t border-zinc-800/40 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleStartReply(comment.id, comment.author.alias)
+                      }
+                      className="inline-flex items-center gap-1 font-medium text-zinc-400 hover:text-red-400 active:text-red-500 active:scale-95 transition-all py-1 px-1.5 -ml-1.5 rounded-md hover:bg-zinc-800/60"
+                    >
+                      Reply
+                    </button>
+
+                    {comment.replies && comment.replies.length > 0 && (
+                      <span className="text-zinc-500 text-[11px] select-none">
+                        • {comment.replies.length}{" "}
+                        {comment.replies.length === 1 ? "reply" : "replies"}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 🧵 यदि यस कमेन्टमा रिप्लाईहरू छन् भने मुनि देखाउने (Indented Thread) */}
+                  {comment.replies && comment.replies.length > 0 && (
+                    <div className="mt-3 space-y-2 border-l-2 border-zinc-800/80 pl-2.5 sm:pl-3.5 ml-1">
+                      {comment.replies.map((reply) => (
+                        <div
+                          key={reply.id}
+                          className="rounded-lg bg-zinc-950/70 border border-zinc-900/80 p-2 sm:p-2.5 text-xs"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-zinc-500">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="font-medium text-zinc-300 truncate">
+                                {reply.author.alias}
+                              </span>
+                              {reply.replyToAlias && (
+                                <span className="text-zinc-500 text-[10px] truncate">
+                                  to{" "}
+                                  <span className="text-red-400/90 font-medium">
+                                    @{reply.replyToAlias}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-zinc-500 shrink-0 select-none">
+                              {new Date(reply.createdAt).toLocaleTimeString(
+                                [],
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                },
+                              )}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-zinc-200 leading-relaxed text-xs wrap-break-word whitespace-pre-wrap">
+                            {reply.content}
+                          </p>
+
+                          <div className="mt-1.5 flex items-center gap-2 pt-0.5 border-t border-zinc-900/60">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleStartReply(comment.id, reply.author.alias)
+                              }
+                              className="text-[10px] font-medium text-zinc-400 hover:text-red-400 active:text-red-500 active:scale-95 transition-all py-0.5 px-1 -ml-1 rounded hover:bg-zinc-800/50"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
 
-              {hasMoreComments && (
-                <button
-                  type="button"
-                  onClick={handleLoadMoreComments}
-                  className="w-full mt-2 rounded-lg border border-zinc-900 bg-zinc-900/30 py-2 text-center text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
-                >
-                  See more echoes ({commentsList.length - visibleCount}{" "}
-                  remaining)
-                </button>
+              {/* 🔄 See More र Show Less बटनहरू */}
+              {(hasMoreComments || hasPrevComments) && (
+                <div className="flex items-center gap-2 pt-2">
+                  {hasPrevComments && (
+                    <button
+                      type="button"
+                      onClick={handleShowLess}
+                      className="rounded-lg border border-zinc-900 bg-zinc-900/30 px-3 py-2 text-center text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                    >
+                      Show less
+                    </button>
+                  )}
+                  {hasMoreComments && (
+                    <button
+                      type="button"
+                      onClick={handleLoadMoreComments}
+                      className="flex-1 rounded-lg border border-zinc-900 bg-zinc-900/40 py-2 text-center text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                    >
+                      See more echoes
+                    </button>
+                  )}
+                </div>
               )}
             </>
           )}

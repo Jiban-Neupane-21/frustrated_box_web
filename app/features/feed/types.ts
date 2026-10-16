@@ -12,6 +12,10 @@ export interface ConfessionComment {
   author: ConfessionAuthor;
   content: string;
   createdAt: string;
+
+  parentId?: string; 
+  replyToAlias?: string;
+  replies?: ConfessionComment[]; 
 }
 
 export interface Confession {
