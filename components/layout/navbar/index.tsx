@@ -104,7 +104,7 @@ export function Navbar({
                 <div className="flex items-center gap-2">
                   <Link
                     href="/notifications"
-                    className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200"
+                    className="relative flex h-8 w-8 items-center justify-center  text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200"
                     aria-label="View notifications"
                   >
                     <Bell className="h-4 w-4" />

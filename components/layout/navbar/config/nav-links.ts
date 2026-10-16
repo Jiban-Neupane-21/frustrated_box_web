@@ -1,4 +1,4 @@
-import { Home, Compass, Users, Quote, CirclePlus } from "lucide-react";
+import { Home, Compass, Users, CirclePlus } from "lucide-react";
 import { NavLinkItem } from "@/components/layout/navbar/types";
 
 /**
@@ -32,11 +32,5 @@ export const CONSUMER_NAV_LINKS: NavLinkItem[] = [
     label: "Communities",
     href: "/communities",
     icon: Users,
-  },
-  {
-    id: "quotes",
-    label: "Quotes",
-    href: "/quotes",
-    icon: Quote,
   },
 ];
