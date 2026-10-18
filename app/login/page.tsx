@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/components/AuthContext";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -31,20 +31,14 @@ export default function LoginPage() {
     setError("");
 
     try {
-      await login(email, password);
-      router.push("/"); // Login successful भएपछि home/feed मा redirect
+      await login(identifier, password);
+      router.push("/"); // Redirect to feed upon successful login
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : undefined;
       setError(message || "Login failed. Please check your credentials.");
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Quick testing helper to auto-fill mock credentials
-  const fillTestAccount = (testEmail: string) => {
-    setEmail(testEmail);
-    setPassword("Password@123");
   };
 
   return (
@@ -68,15 +62,15 @@ export default function LoginPage() {
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-xs text-zinc-300">
-                Email Address
+              <Label htmlFor="identifier" className="text-xs text-zinc-300">
+                Email Address or Username
               </Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="name@frustratedbox.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                placeholder="devbro or devbro@gmail.com"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
                 className="bg-[#141416] border-zinc-800 focus-visible:ring-red-700 text-zinc-100 text-sm"
               />
@@ -100,47 +94,11 @@ export default function LoginPage() {
             <Button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-red-800 hover:bg-red-700 text-white font-medium transition"
+              className="w-full bg-red-800 hover:bg-red-700 text-white font-medium transition cursor-pointer"
             >
               {isLoading ? "Authenticating..." : "Sign In"}
             </Button>
           </form>
-
-          {/* Development Quick Role Switcher for Testing */}
-          <div className="mt-6 pt-4 border-t border-zinc-800/80">
-            <p className="text-[11px] text-zinc-500 mb-2 font-mono uppercase tracking-wider">
-              Testing Accounts (Click to Fill)
-            </p>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fillTestAccount("admin@frustratedbox.com")}
-                className="border-zinc-800 bg-[#141416] hover:bg-red-950/40 hover:text-red-400 text-zinc-300 text-xs"
-              >
-                Admin
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fillTestAccount("mod@frustratedbox.com")}
-                className="border-zinc-800 bg-[#141416] hover:bg-red-950/40 hover:text-red-400 text-zinc-300 text-xs"
-              >
-                Moderator
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fillTestAccount("user@frustratedbox.com")}
-                className="border-zinc-800 bg-[#141416] hover:bg-red-950/40 hover:text-red-400 text-zinc-300 text-xs"
-              >
-                User
-              </Button>
-            </div>
-          </div>
         </CardContent>
 
         <CardFooter className="justify-center border-t border-zinc-800/60 pt-4">

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Navbar } from "./navbar";
 import { DesktopSidebar } from "./sidebar";
@@ -34,7 +34,7 @@ export function AppShell({ children, session = null }: AppShellProps) {
   const [manualActiveCommunity, setManualActiveCommunity] =
     useState<string>("");
 
-  // Clean mapping: "as unknown as UserSession" bypass hataera normalized data pass gareko
+  // Clean mapping: Normalize session from AuthContext
   const currentSession: UserSession | null =
     session ||
     (isAuthenticated && user
@@ -49,25 +49,65 @@ export function AppShell({ children, session = null }: AppShellProps) {
         }
       : null);
 
-  // Derive active navigation mode directly from URL
+  // Derive route flags directly from pathname
   const isPlatformAdminRoute = pathname.startsWith("/admin");
   const communityMatch = pathname.match(/\/c\/([^/]+)\/mod/);
   const isCommunityAdminRoute = Boolean(
     pathname.startsWith("/c/") && communityMatch,
   );
 
-  const navMode: NavMode = isPlatformAdminRoute
-    ? "platform-admin"
-    : isCommunityAdminRoute
-      ? "community-admin"
-      : manualNavMode;
+  // 1. STRICT PERMISSION CHECK: Must be authenticated and have appropriate role
+  const canAccessPlatformAdmin = Boolean(
+    currentSession && currentSession.role === "admin",
+  );
+
+  const canAccessCommunityAdmin = Boolean(
+    currentSession &&
+    communityMatch?.[1] &&
+    currentSession.managedCommunities?.some(
+      (c) =>
+        c.slug === communityMatch[1] &&
+        (c.role === "moderator" || c.role === "owner"),
+    ),
+  );
+
+  // 2. SAFE NAV MODE: If user is logged out or lacks role, force "consumer" mode immediately
+  const navMode: NavMode =
+    isPlatformAdminRoute && canAccessPlatformAdmin
+      ? "platform-admin"
+      : isCommunityAdminRoute && canAccessCommunityAdmin
+        ? "community-admin"
+        : canAccessPlatformAdmin && manualNavMode === "platform-admin"
+          ? "platform-admin"
+          : "consumer";
 
   const activeCommunity =
     isCommunityAdminRoute && communityMatch?.[1]
       ? communityMatch[1]
       : manualActiveCommunity;
 
+  // 3. AUTO-BOUNCE: If user logs out while on a protected route, redirect to /login immediately
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      if (isPlatformAdminRoute || isCommunityAdminRoute) {
+        router.replace("/login");
+      }
+    }
+  }, [
+    isAuthenticated,
+    user,
+    isPlatformAdminRoute,
+    isCommunityAdminRoute,
+    router,
+  ]);
+
   const handleSwitchMode = (mode: NavMode, communitySlug?: string) => {
+    // Prevent unauthenticated mode switches
+    if (!currentSession) {
+      router.push("/login");
+      return;
+    }
+
     setManualNavMode(mode);
     if (mode === "community-admin" && communitySlug) {
       setManualActiveCommunity(communitySlug);

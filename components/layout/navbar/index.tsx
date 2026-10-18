@@ -48,13 +48,13 @@ export function Navbar({
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800/80 bg-[#050505]/80 backdrop-blur-md lg:hidden">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
-        {navMode === "community-admin" ? (
-          /* Dedicated Community Moderator Bar */
+        {/* Only show CommunityModBar if navMode is community-admin AND user has valid session */}
+        {navMode === "community-admin" && session ? (
           <CommunityModBar
             communitySlug={activeCommunity}
             onExit={() => handleSwitchMode("consumer")}
           />
-        ) : navMode === "platform-admin" ? (
+        ) : navMode === "platform-admin" && session?.role === "admin" ? (
           <PlatformAdminBar onExit={() => handleSwitchMode("consumer")} />
         ) : (
           /* Standard Consumer Navigation */

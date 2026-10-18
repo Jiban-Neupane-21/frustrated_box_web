@@ -2,11 +2,10 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Bell,
   User,
-  Flame,
   LogOut,
   Settings,
   ShieldCheck,
@@ -34,14 +33,12 @@ interface DesktopSidebarProps {
 
 export function DesktopSidebar({
   session = null,
-  onOpenCreateModal,
   navMode = "consumer",
   activeCommunity = "",
   onSwitchMode,
   onRequestLogout,
 }: DesktopSidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -55,14 +52,6 @@ export function DesktopSidebar({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  const handleCreate = () => {
-    if (onOpenCreateModal) {
-      onOpenCreateModal();
-    } else {
-      router.push("/#vent-box");
-    }
-  };
 
   // Moderator community pending count for currently active community
   const activeManagedCommunity = session?.managedCommunities?.find(
@@ -81,9 +70,11 @@ export function DesktopSidebar({
   const joinedCommunities =
     session?.managedCommunities?.filter((c) => c.role === "member") ?? [];
 
-  // Determine which navigation links to display based on active navMode
-  const isPlatformAdmin = navMode === "platform-admin";
-  const isCommunityAdmin = navMode === "community-admin";
+  // Only allow admin/mod sidebar links if user actually has an active session and role
+  const isPlatformAdmin = Boolean(
+    session?.role === "admin" && navMode === "platform-admin",
+  );
+  const isCommunityAdmin = Boolean(session && navMode === "community-admin");
 
   const consumerNavLinks = [
     ...CONSUMER_NAV_LINKS,

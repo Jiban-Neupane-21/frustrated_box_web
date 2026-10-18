@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Users, Flame, ArrowLeft } from "lucide-react";
+import { Flame, ArrowLeft } from "lucide-react";
 
 export function generateStaticParams() {
   return [{ slug: "tech-life" }, { slug: "corporate-cage" }];
