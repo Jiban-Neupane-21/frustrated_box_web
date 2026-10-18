@@ -18,6 +18,11 @@ export function ExploreSearchHeader({
 }: SearchHeaderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Label the active filter chip based on the query prefix
+  const firstChar = searchQuery.trim().charAt(0);
+  const filterKind =
+    firstChar === "#" ? "Hashtag" : firstChar === "@" ? "User" : "Keyword";
+
   // ⌘K / Ctrl+K shortcut focus
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -44,7 +49,7 @@ export function ExploreSearchHeader({
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search thoughts, #tags, or raw vents..."
+          placeholder="Search vents, #tags, or @users..."
           className="w-full pl-10 pr-20 py-2.5 bg-[#0a0a0a] border border-zinc-800 rounded-xl text-zinc-100 placeholder:text-zinc-500 text-sm focus:outline-none focus:border-red-900 focus:ring-1 focus:ring-red-900 transition-all shadow-inner"
         />
 
@@ -76,7 +81,7 @@ export function ExploreSearchHeader({
 
           {searchQuery && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-300">
-              Keyword:{" "}
+              {filterKind}:{" "}
               <span className="text-red-400 font-medium">{searchQuery}</span>
               <button
                 type="button"

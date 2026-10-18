@@ -11,6 +11,7 @@ export interface ExplorePost {
   burnCount: number;
   commentCount: number;
   isSensitive?: boolean;
+  tags?: string[];
 }
 
 export interface ExploreShelf {
@@ -72,6 +73,12 @@ export interface SearchUser {
   isFollowing?: boolean;
 }
 
+// Search modes decided by the first character of the query:
+//   "#word"  -> hashtag (posts only)
+//   "@name"  -> username (people only)
+//   "text"   -> keyword (communities + confession posts)
+export type SearchMode = "text" | "hashtag" | "username";
+
 // ३. सर्च ट्याब्स (Facebook/Twitter जस्तै)
 export type SearchCategoryTab = "all" | "posts" | "people" | "communities";
 
@@ -91,3 +98,11 @@ export interface OmniSearchResult {
   totalPosts: number;
 }
 
+
+// ६. कम्युनिटी लिस्ट (random preview / all communities)
+export interface PaginatedCommunitiesResponse {
+  communities: SearchCommunity[];
+  totalCount: number;
+  hasMore: boolean;
+  nextPage: number;
+}

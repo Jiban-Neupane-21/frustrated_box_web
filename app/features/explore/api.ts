@@ -11,6 +11,9 @@ import {
   SearchCategoryTab,
   OmniSearchResult,
   PaginatedExploreResponse,
+  PaginatedCommunitiesResponse,
+  SearchCommunity,
+  SearchMode,
   SearchUser,
 } from "./types";
 
@@ -48,6 +51,7 @@ function toExplorePost(c: Confession): ExplorePost {
     relateCount: c.relateCount,
     burnCount: c.burnCount,
     commentCount: c.echoCount,
+    tags: c.tags,
   };
 }
 
@@ -113,10 +117,17 @@ export async function fetchTopDiscoveredPosts(params: {
 }
 
 /**
- * 📡 2. Unified Omnisearch (Search across Posts, People, and Communities)
+ * 📡 2. Unified Omnisearch
+ *
+ * mode "hashtag"  -> posts whose tags match (people/communities empty)
+ * mode "username" -> people whose alias/username match (posts/communities empty)
+ * mode "text"     -> confession posts + communities (people empty)
+ *
+ * A leading # or @ in `query` is stripped here too, so the caller can pass either form.
  */
 export async function searchExploreOmni(params: {
   query: string;
+  mode?: SearchMode;
   tab?: SearchCategoryTab;
   mood?: string;
   page?: number;
@@ -124,53 +135,121 @@ export async function searchExploreOmni(params: {
 }): Promise<OmniSearchResult> {
   await new Promise((resolve) => setTimeout(resolve, 150));
 
-  const q = params.query.trim().toLowerCase();
+  const mode: SearchMode = params.mode ?? "text";
+  const q = params.query
+    .trim()
+    .replace(/^[#@]+/, "")
+    .toLowerCase();
   const page = params.page || 1;
   const limit = params.limit || 12;
 
-  // 1. Search matching communities
-  const matchedCommunities = MOCK_COMMUNITIES.filter(
+  // 👤 @username search -> people only
+  if (mode === "username") {
+    const uq = q.replace(/-/g, "_");
+    const people: SearchUser[] = NAMED_USERS.filter(
+      (u) =>
+        u.alias.toLowerCase().includes(q) ||
+        u.seed.replace(/-/g, "_").toLowerCase().includes(uq),
+    ).map((u, index) => ({
+      id: `user-${u.seed}`,
+      alias: u.alias,
+      username: u.seed.replace(/-/g, "_"),
+      bio: `Active author sharing raw rants • @${u.seed.replace(/-/g, "_")}`,
+      totalBurnsReceived: (index + 1) * 350 + 120,
+      postCount: (index + 1) * 3 + 2,
+      isFollowing: false,
+    }));
+
+    return { posts: [], people, communities: [], totalPosts: 0 };
+  }
+
+  // 🏷️ #hashtag search -> posts only
+  if (mode === "hashtag") {
+    let tagged = MOCK_CONFESSIONS.filter((c) =>
+      c.tags.some((t) => t.toLowerCase().replace(/^#/, "").includes(q)),
+    ).map(toExplorePost);
+
+    if (params.mood && params.mood !== "all") {
+      tagged = tagged.filter((p) => p.moodId === params.mood);
+    }
+
+    const start = (page - 1) * limit;
+    return {
+      posts: tagged.slice(start, start + limit),
+      people: [],
+      communities: [],
+      totalPosts: tagged.length,
+    };
+  }
+
+  // 🔎 Plain text search -> confession posts + communities
+  const matchedCommunities = (
+    MOCK_COMMUNITIES as unknown as SearchCommunity[]
+  ).filter(
     (c) =>
       c.name.toLowerCase().includes(q) ||
       c.slug.toLowerCase().includes(q) ||
       c.description.toLowerCase().includes(q),
   );
 
-  // 2. Search matching people/authors from NAMED_USERS
-  const matchedPeople: SearchUser[] = NAMED_USERS.filter(
-    (u) =>
-      u.alias.toLowerCase().includes(q) || u.seed.toLowerCase().includes(q),
-  ).map((u, index) => ({
-    id: `user-${u.seed}`,
-    alias: u.alias,
-    username: u.seed.replace(/-/g, "_"),
-    bio: `Active author sharing raw rants • @${u.seed.replace(/-/g, "_")}`,
-    totalBurnsReceived: (index + 1) * 350 + 120,
-    postCount: (index + 1) * 3 + 2,
-    isFollowing: false,
-  }));
-
-  // 3. Search matching posts
   let matchedPosts = MOCK_CONFESSIONS.map(toExplorePost).filter(
     (p) =>
       p.content.toLowerCase().includes(q) ||
-      p.author.toLowerCase().includes(q) ||
-      p.moodLabel.toLowerCase().includes(q),
+      p.moodLabel.toLowerCase().includes(q) ||
+      (p.tags ?? []).some((t) => t.toLowerCase().includes(q)),
   );
 
   if (params.mood && params.mood !== "all") {
     matchedPosts = matchedPosts.filter((p) => p.moodId === params.mood);
   }
 
-  const totalPosts = matchedPosts.length;
   const startIndex = (page - 1) * limit;
-  const paginatedPosts = matchedPosts.slice(startIndex, startIndex + limit);
 
   return {
-    posts: paginatedPosts,
-    people: matchedPeople,
-    communities:
-      matchedCommunities as unknown as OmniSearchResult["communities"],
-    totalPosts,
+    posts: matchedPosts.slice(startIndex, startIndex + limit),
+    people: [],
+    communities: matchedCommunities,
+    totalPosts: matchedPosts.length,
+  };
+}
+
+/**
+ * 📡 3. Communities list
+ *  - random: true  -> random picks (used for the 5-6 suggestions under the search bar)
+ *  - random: false -> all communities, biggest first, paginated ("Explore more")
+ */
+export async function fetchExploreCommunities(params: {
+  page?: number;
+  limit?: number;
+  random?: boolean;
+}): Promise<PaginatedCommunitiesResponse> {
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const page = params.page || 1;
+  const limit = params.limit || 12;
+  const all = [...(MOCK_COMMUNITIES as unknown as SearchCommunity[])];
+
+  if (params.random) {
+    // Fisher-Yates shuffle
+    for (let i = all.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [all[i], all[j]] = [all[j], all[i]];
+    }
+    return {
+      communities: all.slice(0, limit),
+      totalCount: all.length,
+      hasMore: all.length > limit,
+      nextPage: 2,
+    };
+  }
+
+  all.sort((a, b) => (b.membersCount ?? 0) - (a.membersCount ?? 0));
+  const start = (page - 1) * limit;
+
+  return {
+    communities: all.slice(start, start + limit),
+    totalCount: all.length,
+    hasMore: start + limit < all.length,
+    nextPage: page + 1,
   };
 }
