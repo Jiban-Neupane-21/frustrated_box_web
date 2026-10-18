@@ -492,4 +492,70 @@ function generate(): Confession[] {
   return list;
 }
 
+// ==========================================
+// MOCK COMMUNITIES FOR EXPLORE & SEARCH
+// ==========================================
+export const MOCK_COMMUNITIES = [
+  {
+    id: "comm-1",
+    name: "Tech Life & Code Burnout",
+    slug: "tech-life",
+    description:
+      "Developers screaming about prod bugs, legacy codebases, and sprint deadlines.",
+    membersCount: 14200,
+    initials: "TL",
+    isJoined: false,
+  },
+  {
+    id: "comm-2",
+    name: "Corporate Cage",
+    slug: "corporate-cage",
+    description:
+      "9-to-5 survivors venting about micromanagers, corporate politics, and long meetings.",
+    membersCount: 28400,
+    initials: "CC",
+    isJoined: true,
+  },
+  {
+    id: "comm-3",
+    name: "Midnight Thoughts & Overthinking",
+    slug: "midnight-thoughts",
+    description:
+      "Late night existential rants, insomnia thoughts, and unspoken confessions.",
+    membersCount: 19800,
+    initials: "MT",
+    isJoined: false,
+  },
+  {
+    id: "comm-4",
+    name: "Heartbreak & Silent Tears",
+    slug: "heartbreak-hotel",
+    description:
+      "Moving on from past memories, unsaid feelings, and broken trust.",
+    membersCount: 9300,
+    initials: "HH",
+    isJoined: false,
+  },
+  {
+    id: "comm-5",
+    name: "Academic Chaos & Exams",
+    slug: "academic-chaos",
+    description:
+      "Students struggling with semester exams, thesis papers, and CGPA stress.",
+    membersCount: 16500,
+    initials: "AC",
+    isJoined: false,
+  },
+  {
+    id: "comm-6",
+    name: "Happy Mask Falloff",
+    slug: "happy-mask",
+    description:
+      "Faking a happy smile for everyone outside while struggling silently inside.",
+    membersCount: 7800,
+    initials: "HM",
+    isJoined: false,
+  },
+] as const;
+
 export const BULK_CONFESSIONS: Confession[] = generate();

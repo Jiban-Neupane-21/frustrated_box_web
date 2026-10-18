@@ -1,4 +1,3 @@
-// frustratedbox-web/components/ui/logo.tsx
 import React from "react";
 
 interface LogoProps {
@@ -25,13 +24,7 @@ export function Logo({
           94% { transform: translateY(-1.5px) rotate(-1deg); }
         }
 
-        /* Hover: box shake */
-        @keyframes fb-shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-1px) rotate(-0.5deg); }
-          75% { transform: translateX(1px) rotate(0.5deg); }
-        }
-
+        /* SVG visual components behavior */
         .fb-body {
           transform-box: fill-box;
           transform-origin: center;
@@ -66,190 +59,69 @@ export function Logo({
         }
       `}</style>
 
-      {/* SVG Icon */}
+      {/* Frustrated Box Brand Icon */}
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 512 512"
+        viewBox="0 0 500 500"
         width={size}
         height={size}
-        fill="none"
-        className="shrink-0"
+        role="img"
+        aria-label="Frustrated Box Icon"
+        className="fb-body overflow-visible"
       >
         <defs>
-          <linearGradient
-            id="topFace"
-            x1="256"
-            y1="96"
-            x2="256"
-            y2="246"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0%" stopColor="#1c1917" />
-            <stop offset="100%" stopColor="#0f0e0e" />
-          </linearGradient>
+          <style>{`
+            .stroke { 
+              fill: none; 
+              stroke: #ff1a1a; 
+              stroke-width: 9; 
+              stroke-linecap: round; 
+              stroke-linejoin: round; 
+            }
+            /* Inner components to map on CSS anim classes */
+            .fb-bubble-bg {
+              fill: #000;
+            }
+          `}</style>
 
-          <linearGradient
-            id="leftFace"
-            x1="120"
-            y1="210"
-            x2="256"
-            y2="416"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0%" stopColor="#141416" />
-            <stop offset="100%" stopColor="#09090b" />
-          </linearGradient>
-
-          <linearGradient
-            id="rightFace"
-            x1="392"
-            y1="210"
-            x2="256"
-            y2="416"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0%" stopColor="#0d0d0f" />
-            <stop offset="100%" stopColor="#050505" />
-          </linearGradient>
-
-          <filter id="crackGlow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="4" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
+          {/* Subtle Outer Glow for frustration dynamic */}
+          <filter id="frust-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
         </defs>
 
-        {/* CUBE BODY (fb-body shake animate हुन्छ) */}
-        <g className="fb-body">
-          {/* Top Face (fb-lid strain animate हुन्छ) */}
-          <polygon
-            className="fb-lid"
-            points="256,96 392,170 256,246 120,170"
-            fill="url(#topFace)"
-            stroke="#27272a"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-
-          {/* Left Face */}
-          <polygon
-            points="120,170 256,246 256,416 120,336"
-            fill="url(#leftFace)"
-            stroke="#27272a"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-
-          {/* Right Face */}
-          <polygon
-            points="256,246 392,170 392,336 256,416"
-            fill="url(#rightFace)"
-            stroke="#27272a"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-
-          {/* Inner Accent Edges */}
-          <line
-            x1="256"
-            y1="246"
-            x2="256"
-            y2="416"
-            stroke="#1f1f23"
-            strokeWidth="2"
-          />
-          <line
-            x1="120"
-            y1="170"
-            x2="256"
-            y2="246"
-            stroke="#27272a"
-            strokeWidth="2"
-          />
-          <line
-            x1="392"
-            y1="170"
-            x2="256"
-            y2="246"
-            stroke="#1f1f23"
-            strokeWidth="2"
-          />
-        </g>
-
-        {/* FRACTURES / CRACKS (Hover गर्दा glow हुन्छ) */}
-        <g className="fb-cracks" filter="url(#crackGlow)">
-          {/* Main Center Fracture */}
-          <path
-            d="M 230 110 
-               L 265 155 
-               L 242 195 
-               L 256 246 
-               L 236 295 
-               L 272 345 
-               L 250 416"
-            stroke="#ef4444"
-            strokeWidth="5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* Left Branch */}
-          <path
-            d="M 242 195 
-               L 185 225 
-               L 150 255"
-            stroke="#dc2626"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* Right Branch */}
-          <path
-            d="M 256 246 
-               L 305 270 
-               L 345 285"
-            stroke="#dc2626"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* Lower Branch */}
-          <path
-            d="M 236 295 
-               L 180 325"
-            stroke="#b91c1c"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          />
-        </g>
-
-        {/* High-Heat White Core Line */}
+        {/* Back bubble representing user overlay */}
         <path
-          d="M 233 118 
-             L 265 155 
-             L 242 195 
-             L 256 246 
-             L 236 295 
-             L 270 342 
-             L 252 405"
-          stroke="#ffffff"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          opacity="0.95"
+          className="stroke fb-lid fb-cracks"
+          filter="url(#frust-glow)"
+          d="M300 194 C335 194 350 215 350 240 V258 C350 280 340 305 323 333 L296 312 L252 298"
         />
 
-        {/* Ejected Shards */}
-        <polygon points="285,140 292,135 290,146" fill="#dc2626" />
-        <polygon points="215,280 222,275 220,286" fill="#ef4444" />
-        <polygon points="325,255 332,250 330,260" fill="#dc2626" />
+        {/* Inner core boundary group */}
+        <g className="fb-cracks">
+          {/* Front frustrated face */}
+          <path
+            className="stroke fb-bubble-bg"
+            d="M190 164 H262 A38 38 0 0 1 300 202 V234 A38 38 0 0 1 262 272 H238 L178 300 L192 267 Q152 255 152 234 V202 A38 38 0 0 1 190 164 Z"
+          />
+
+          {/* Aggressive Eyebrows (Tension-lines) */}
+          <path className="stroke" d="M184 192 L214 206 M268 192 L238 206" />
+
+          {/* Angry Eyes */}
+          <circle cx="204" cy="222" r="7" fill="#ff1a1a" />
+          <circle cx="248" cy="222" r="7" fill="#ff1a1a" />
+
+          {/* Frustrated Scribble Mouth */}
+          <path
+            className="stroke"
+            d="M202 252 L214 244 L226 252 L238 244 L250 252"
+          />
+        </g>
       </svg>
 
-      {/* Brand Wordmark */}
+      {/* Brand Wordmark text */}
       {showText && (
         <span className="font-black text-xl tracking-tighter text-white flex items-center">
           Frustrated
