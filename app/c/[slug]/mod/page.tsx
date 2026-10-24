@@ -1,8 +1,11 @@
 import React from "react";
 import { Shield, ShieldAlert, Users } from "lucide-react";
 
+import {COMMUNITY_SLUGS} from "@/lib/communities";
+
 export function generateStaticParams() {
-  return [{ slug: "tech-life" }, { slug: "corporate-cage" }];
+  // All community slugs from mock data (lib/mockData.ts)
+  return COMMUNITY_SLUGS.map((slug) => ({ slug }));
 }
 
 export default async function CommunityModPage({

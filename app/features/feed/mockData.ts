@@ -9,6 +9,58 @@ import { BULK_CONFESSIONS } from "./mockConfessionsBulk";
  * =====================================================================
  */
 export const BASE_CONFESSIONS: Confession[] = [
+
+  {
+    id: "conf-testmaster-public",
+    author: {
+      id: "usr_testmaster",
+      alias: "TestMaster",
+      isAnonymous: false,
+      avatarSeed: "testmaster",
+    },
+    content: "Deploying to production on Friday afternoon is an extreme sport that I love. 🚀",
+    tags: ["techlife", "prod", "deploy"],
+    semanticCluster: "workplace-burnout",
+    relateCount: 45,
+    burnCount: 12,
+    echoCount: 1,
+    isRelatableByMe: false,
+    isBurnedByMe: true,
+    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+    comments: [
+      {
+        id: "comm-tm-1",
+        author: {
+          id: "usr_devbro",
+          alias: "DevBro",
+          isAnonymous: false,
+          avatarSeed: "devbro",
+        },
+        content: "Don't do it bro, it's a trap!",
+        createdAt: new Date(Date.now() - 1 * 3600 * 1000).toISOString(),
+      },
+    ],
+  },
+
+    {
+    id: "conf-testmaster-private",
+    author: {
+      id: "usr_testmaster",
+      alias: "Anonymous Venter",
+      isAnonymous: true,
+      avatarSeed: "anon-tm",
+    },
+    content: "🔒 [Confidential] I have no idea how Kubernetes works, I just restart the pods until the red turns green.",
+    tags: ["secret", "kubernetes"],
+    semanticCluster: "workplace-burnout",
+    relateCount: 99,
+    burnCount: 3,
+    echoCount: 0,
+    isRelatableByMe: false,
+    isBurnedByMe: false,
+    createdAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
+  },
+
   // -------------------------------------------------------------------
   // 1. DevBro - Friday Prod Crash (With Tech Life Discussions)
   // -------------------------------------------------------------------

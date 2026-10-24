@@ -7,6 +7,57 @@ export interface MockUserRecord extends User {
 }
 
 export const INITIAL_MOCK_USERS: MockUserRecord[] = [
+
+
+    // ==========================================
+  // SUPER TEST USER (All-in-One Testing)
+  // ==========================================
+  {
+    id: "usr_testmaster",
+    name: "Super Test Master",
+    username: "testmaster",
+    email: "testmaster@frustratedbox.com",
+    role: "ADMIN",
+    password: "Password@123",
+    token: "mock-jwt-testmaster-token",
+    managedCommunities: [
+      {
+        id: "comm-1",
+        name: "Tech Life & Code Burnout",
+        slug: "tech-life",
+        role: "owner",
+        pendingReportsCount: 5,
+      },
+      {
+        id: "comm-2",
+        name: "Corporate Cage",
+        slug: "corporate-cage",
+        role: "moderator",
+        pendingReportsCount: 2,
+      },
+      {
+        id: "comm-3",
+        name: "Midnight Designers",
+        slug: "midnight-designers",
+        role: "member",
+        pendingReportsCount: 0,
+      },
+    ],
+    profile: {
+      bio: "QA Architect & Platform Admin. Testing owner spaces, mod queues, and confidential vents.",
+      avatarUrl: "https://api.dicebear.com/7.x/bottts/svg?seed=testmaster",
+      coverUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+      work: { occupation: "Lead QA Architect", company: "FrustratedBox Core" },
+      education: { degree: "M.S. in Chaos Engineering", schoolOrCollege: "MIT" },
+      location: { city: "Kathmandu", hometown: "Pokhara" },
+      relationshipStatus: "Complicated",
+      website: "https://testmaster.dev",
+      joinedDate: "January 2026",
+    },
+    following: ["usr_devbro", "usr_admin"],
+  },
+
+  
   // ==========================================
   // 1. SUPER ADMIN & PLATFORM GOVERNANCE
   // ==========================================
