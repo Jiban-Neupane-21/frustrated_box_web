@@ -3,17 +3,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import {
-  Shield,
-  Check,
-  X,
-  AlertCircle,
-  Loader2,
-  Lock,
-  Globe,
-  EyeOff,
-  Sparkles,
-} from "lucide-react";
+import { Eye, Check, X, AlertCircle, Lock, EyeOff } from "lucide-react";
 import { CreateCommunityInput } from "@/types/create";
 import { communityService } from "@/lib/communityService";
 import { useAuth } from "@/components/AuthContext";
@@ -27,12 +17,20 @@ export const CATEGORIES = [
   { id: "general", label: "General Vents" },
 ];
 
+const MIN_NAME = 3;
+const MIN_SLUG = 3;
+const MIN_DESC = 10;
+const MAX_DESC = 180;
+
 interface CommunityCreatorProps {
   communityData: CreateCommunityInput;
   onChange: (updates: Partial<CreateCommunityInput>) => void;
+  /** Preview step मा जान बोलाइन्छ (create होइन) */
   onSubmit: () => Promise<void>;
   isSubmitting: boolean;
 }
+
+type SlugStatus = "idle" | "short" | "available" | "taken";
 
 export function CommunityCreator({
   communityData,
@@ -40,176 +38,211 @@ export function CommunityCreator({
   onSubmit,
   isSubmitting,
 }: CommunityCreatorProps) {
-  const { isAuthenticated, user } = useAuth();
-  const [slugStatus, setSlugStatus] = useState<"idle" | "available" | "taken">("idle");
+  const { isAuthenticated } = useAuth();
+  const [slugStatus, setSlugStatus] = useState<SlugStatus>("idle");
   const [isManualSlug, setIsManualSlug] = useState(false);
 
   // नाम परिवर्तन हुँदा Slug स्वतः अपडेट गर्ने
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const name = e.target.value;
-    const newSlug = isManualSlug
-      ? communityData.slug
-      : communityService.slugify(name);
-
+    const newSlug = isManualSlug ? communityData.slug : communityService.slugify(name);
     onChange({ name, slug: newSlug });
   };
 
   // Slug परिवर्तन हुँदा भ्यालिडेट गर्ने
   const handleSlugChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsManualSlug(true);
     const clean = communityService.slugify(e.target.value);
+    // Slug पूरै मेटियो भने फेरि नामबाट स्वतः बन्ने बनाउने
+    setIsManualSlug(clean.length > 0);
     onChange({ slug: clean });
   };
 
-  // Slug उपलब्ध छ कि छैन Real-time जाँच्ने
+  // Slug उपलब्ध छ कि छैन जाँच्ने
   useEffect(() => {
-    if (!communityData.slug.trim()) {
+    const slug = communityData.slug.trim();
+    if (!slug) {
       setSlugStatus("idle");
       return;
     }
-    const taken = communityService.isSlugTaken(communityData.slug);
-    setSlugStatus(taken ? "taken" : "available");
+    if (slug.length < MIN_SLUG) {
+      setSlugStatus("short");
+      return;
+    }
+    setSlugStatus(communityService.isSlugTaken(slug) ? "taken" : "available");
   }, [communityData.slug]);
 
-  const isFormValid =
-    communityData.name.trim().length >= 3 &&
-    communityData.slug.trim().length >= 3 &&
-    slugStatus === "available" &&
-    communityData.description.trim().length >= 10 &&
-    isAuthenticated;
+  const nameOk = communityData.name.trim().length >= MIN_NAME;
+  const slugOk = slugStatus === "available";
+  const descOk = communityData.description.trim().length >= MIN_DESC;
+  const isFormValid = nameOk && slugOk && descOk && isAuthenticated;
+  const canPreview = isFormValid && !isSubmitting;
+
+  // बटन disable हुँदा किन भनेर बताउने
+  const missing: string[] = [];
+  if (!nameOk) missing.push(`a name (${MIN_NAME}+ characters)`);
+  if (!slugOk) missing.push("an available URL");
+  if (!descOk) missing.push(`a description (${MIN_DESC}+ characters)`);
+
+  const inputBase =
+    "w-full rounded-xl border border-zinc-800 bg-zinc-950 text-base text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-amber-500 focus:ring-1 focus:ring-amber-500 sm:text-sm";
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (isFormValid) onSubmit();
+        if (canPreview) onSubmit();
       }}
-      className="flex flex-col gap-5"
+      className="flex flex-col gap-6"
     >
-      {/* 0. Guest Login Warning if not authenticated */}
+      {/* 0. Login warning */}
       {!isAuthenticated && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-800/60 bg-amber-950/40 p-3.5 text-xs text-amber-200">
-          <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-amber-800/60 bg-amber-950/40 p-3.5 text-sm text-amber-200"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <div className="flex-1">
-            <p className="font-bold">Authentication Required</p>
-            <p className="mt-0.5 text-amber-300/80">
-              You must be logged in to create a community and become its Owner/Moderator.
+            <p className="font-bold">Log in to create a community</p>
+            <p className="mt-0.5 text-xs text-amber-300/80">
+              You become the owner and moderator of any community you create.
             </p>
             <Link
               href="/login"
-              className="mt-2 inline-flex items-center gap-1 font-bold text-white underline hover:text-amber-300"
+              className="mt-2 inline-flex min-h-11 items-center font-bold text-white underline hover:text-amber-300"
             >
-              Sign in now →
+              Log in
             </Link>
           </div>
         </div>
       )}
 
-      {/* 1. Community Name */}
+      {/* 1. Name */}
       <div>
-        <label className="mb-1.5 block text-xs font-semibold text-zinc-300">
-          Community Name <span className="text-red-500">*</span>
+        <label htmlFor="community-name" className="mb-2 block text-sm font-semibold text-zinc-200">
+          Community name <span className="text-red-500" aria-hidden="true">*</span>
         </label>
         <input
+          id="community-name"
           type="text"
           value={communityData.name}
           onChange={handleNameChange}
-          placeholder="e.g. Midnight Overthinkers, Freelance Hell"
+          placeholder="e.g. Midnight Overthinkers"
           maxLength={40}
-          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+          autoComplete="off"
+          className={`${inputBase} min-h-12 px-3.5 py-2.5`}
         />
       </div>
 
-      {/* 2. Community Slug & URL Preview */}
+      {/* 2. Slug */}
       <div>
-        <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-xs font-semibold text-zinc-300">
-            Community URL Identifier (Slug) <span className="text-red-500">*</span>
-          </label>
-          {slugStatus === "available" && (
-            <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-400">
-              <Check className="h-3.5 w-3.5" />
-              <span>Available</span>
-            </span>
-          )}
-          {slugStatus === "taken" && (
-            <span className="flex items-center gap-1 text-[11px] font-bold text-red-400">
-              <X className="h-3.5 w-3.5" />
-              <span>Slug already taken</span>
-            </span>
-          )}
-        </div>
+        <label htmlFor="community-slug" className="mb-2 block text-sm font-semibold text-zinc-200">
+          Community URL <span className="text-red-500" aria-hidden="true">*</span>
+        </label>
 
-        <div className="flex items-center rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-2">
-          <span className="text-xs font-medium text-zinc-500 shrink-0">
-            frustratedbox.com/c/
-          </span>
+        <div className="flex min-h-12 flex-wrap items-center gap-x-1 rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-2 focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500">
+          <span className="shrink-0 text-sm text-zinc-500">frustratedbox.com/c/</span>
           <input
+            id="community-slug"
             type="text"
             value={communityData.slug}
             onChange={handleSlugChange}
-            placeholder="slug-name"
+            placeholder="your-community"
             maxLength={30}
-            className="w-full bg-transparent text-xs font-semibold text-amber-400 outline-none"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-describedby="slug-help"
+            className="min-w-[8rem] flex-1 bg-transparent py-1 text-base font-semibold text-amber-400 outline-none placeholder-zinc-700 sm:text-sm"
           />
         </div>
-        <p className="mt-1 text-[10px] text-zinc-500">
-          Letters, numbers, and hyphens only. Permanent URL after creation.
-        </p>
+
+        <div id="slug-help" className="mt-1.5 min-h-5 text-xs" aria-live="polite">
+          {slugStatus === "available" && (
+            <span className="flex items-center gap-1 font-semibold text-emerald-400">
+              <Check className="h-3.5 w-3.5" /> This URL is available
+            </span>
+          )}
+          {slugStatus === "taken" && (
+            <span className="flex items-center gap-1 font-semibold text-red-400">
+              <X className="h-3.5 w-3.5" /> This URL is taken. Try a different one.
+            </span>
+          )}
+          {slugStatus === "short" && (
+            <span className="text-zinc-400">Use at least {MIN_SLUG} characters.</span>
+          )}
+          {slugStatus === "idle" && (
+            <span className="text-zinc-500">
+              Letters, numbers and hyphens only. You can&apos;t change it later.
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 3. Category */}
       <div>
-        <label className="mb-1.5 block text-xs font-semibold text-zinc-300">
-          Primary Topic / Category
+        <label htmlFor="community-category" className="mb-2 block text-sm font-semibold text-zinc-200">
+          Main topic
         </label>
-        <select
-          value={communityData.category}
-          onChange={(e) => onChange({ category: e.target.value })}
-          className="w-full appearance-none rounded-xl border border-zinc-800 bg-zinc-950 px-3.5 py-2.5 text-xs font-medium text-zinc-200 outline-none transition focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-        >
-          {CATEGORIES.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.label}
-            </option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            id="community-category"
+            value={communityData.category}
+            onChange={(e) => onChange({ category: e.target.value })}
+            className={`${inputBase} min-h-12 appearance-none py-2.5 pl-3.5 pr-10 font-medium`}
+          >
+            {CATEGORIES.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.label}
+              </option>
+            ))}
+          </select>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-zinc-500"
+          >
+            ▼
+          </div>
+        </div>
       </div>
 
       {/* 4. Description */}
       <div>
-        <label className="mb-1.5 block text-xs font-semibold text-zinc-300">
-          Community Mission / Description <span className="text-red-500">*</span>
-        </label>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <label htmlFor="community-description" className="text-sm font-semibold text-zinc-200">
+            What is this community for? <span className="text-red-500" aria-hidden="true">*</span>
+          </label>
+          <span
+            className={`font-mono text-xs ${
+              communityData.description.length >= MAX_DESC ? "font-bold text-amber-400" : "text-zinc-500"
+            }`}
+          >
+            {communityData.description.length} / {MAX_DESC}
+          </span>
+        </div>
         <textarea
-          rows={3}
+          id="community-description"
+          rows={4}
           value={communityData.description}
           onChange={(e) => onChange({ description: e.target.value })}
-          maxLength={180}
-          placeholder="What is this space for? Who belongs here? (e.g., A safe haven for software engineers suffering from 80-hour work weeks...)"
-          className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+          maxLength={MAX_DESC}
+          placeholder="Who belongs here? e.g. A safe place for engineers dealing with 80-hour work weeks."
+          className={`${inputBase} min-h-28 resize-y p-3.5 leading-relaxed`}
         />
-        <div className="text-right text-[10px] text-zinc-600">
-          {communityData.description.length} / 180
-        </div>
       </div>
 
-      {/* 5. Moderation & Privacy Settings */}
-      <div className="flex flex-col gap-2.5 border-t border-zinc-800/80 pt-4">
-        <label className="text-xs font-semibold text-zinc-300">
-          Community Privacy & Rules
-        </label>
+      {/* 5. Privacy */}
+      <fieldset className="flex flex-col gap-3 border-t border-zinc-800/80 pt-5">
+        <legend className="mb-1 pr-2 text-sm font-semibold text-zinc-200">
+          Privacy and rules
+        </legend>
 
-        {/* Restricted toggle */}
-        <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-          <div className="flex items-center gap-2.5">
-            <Lock className="h-4 w-4 text-zinc-400 shrink-0" />
+        <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3.5">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
             <div>
-              <p className="text-xs font-semibold text-zinc-200">
-                Restricted Posting
-              </p>
-              <p className="text-[10px] text-zinc-500">
-                Only joined members can post vents. Non-members can only read.
+              <p className="text-sm font-semibold text-zinc-200">Members-only posting</p>
+              <p className="text-xs text-zinc-500">
+                Only people who join can post. Everyone else can read.
               </p>
             </div>
           </div>
@@ -217,20 +250,17 @@ export function CommunityCreator({
             type="checkbox"
             checked={communityData.isRestricted || false}
             onChange={(e) => onChange({ isRestricted: e.target.checked })}
-            className="h-4 w-4 accent-amber-500 rounded cursor-pointer"
+            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded accent-amber-500"
           />
-        </div>
+        </label>
 
-        {/* Anonymous Only toggle */}
-        <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3">
-          <div className="flex items-center gap-2.5">
-            <EyeOff className="h-4 w-4 text-zinc-400 shrink-0" />
+        <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-zinc-800/80 bg-zinc-950/60 p-3.5">
+          <div className="flex items-start gap-3">
+            <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
             <div>
-              <p className="text-xs font-semibold text-zinc-200">
-                Strict Anonymous-Only Space
-              </p>
-              <p className="text-[10px] text-zinc-500">
-                Hide member identities entirely. Nobody can reveal their real name here.
+              <p className="text-sm font-semibold text-zinc-200">Anonymous only</p>
+              <p className="text-xs text-zinc-500">
+                Member identities stay hidden. Nobody can post with their real name here.
               </p>
             </div>
           </div>
@@ -238,30 +268,26 @@ export function CommunityCreator({
             type="checkbox"
             checked={communityData.isAnonymousOnly || false}
             onChange={(e) => onChange({ isAnonymousOnly: e.target.checked })}
-            className="h-4 w-4 accent-amber-500 rounded cursor-pointer"
+            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded accent-amber-500"
           />
-        </div>
-      </div>
+        </label>
+      </fieldset>
 
-      {/* 6. Action Button */}
-      <div className="flex items-center justify-end gap-3 pt-2">
+      {/* 6. Preview button */}
+      <div className="flex flex-col gap-2 pt-1">
         <button
           type="submit"
-          disabled={!isFormValid || isSubmitting}
-          className="flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-amber-950/50 transition hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          disabled={!canPreview}
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-amber-950/50 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-white sm:ml-auto sm:w-auto sm:min-w-52"
         >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Founding Space...</span>
-            </>
-          ) : (
-            <>
-              <Shield className="h-4 w-4" />
-              <span>Claim & Launch Community 🛡️</span>
-            </>
-          )}
+          <Eye className="h-4 w-4" />
+          <span>Preview community</span>
         </button>
+        {isAuthenticated && missing.length > 0 && (
+          <p className="text-center text-xs text-zinc-500 sm:text-right">
+            Still needed: {missing.join(", ")}.
+          </p>
+        )}
       </div>
     </form>
   );

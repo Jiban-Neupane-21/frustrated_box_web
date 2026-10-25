@@ -1,10 +1,21 @@
 // app/post/page.tsx
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Flame, Shield, ArrowLeft, Sparkles, Users, Lock } from "lucide-react";
+import {
+  Flame,
+  Shield,
+  ArrowLeft,
+  Sparkles,
+  Users,
+  Lock,
+  Pencil,
+  Send,
+  Loader2,
+  Eye,
+} from "lucide-react";
 import { CreateTabMode, CreateVentInput, CreateCommunityInput } from "@/types/create";
 import { VentComposer } from "./components/VentComposer";
 import { LiveVentPreview } from "./components/LiveVentPreview";
@@ -14,11 +25,13 @@ import { communityService } from "@/lib/communityService";
 import { useAuth } from "@/components/AuthContext";
 import { DarkToast } from "@/lib/swal";
 
+type Step = "edit" | "preview";
+
 export default function PostPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-[#050505] p-8 text-center text-zinc-500">
+        <div className="min-h-screen bg-[#050505] p-8 text-center text-sm text-zinc-500">
           Loading creation studio...
         </div>
       }
@@ -31,12 +44,14 @@ export default function PostPage() {
 function PostPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = (searchParams.get("tab") as CreateTabMode) || "vent";
+  const tabParam = searchParams.get("tab");
+  const initialTab: CreateTabMode = tabParam === "community" ? "community" : "vent";
   const initialCommunity = searchParams.get("c") || null;
 
   const { user, isAuthenticated, updateUser } = useAuth();
 
   const [activeTab, setActiveTab] = useState<CreateTabMode>(initialTab);
+  const [step, setStep] = useState<Step>("edit");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // १. Vent Form State
@@ -60,9 +75,25 @@ function PostPageContent() {
     isAnonymousOnly: false,
   });
 
+  // Step बदलिँदा पेजको माथि स्क्रोल गर्ने (मोबाइलमा महत्त्वपूर्ण)
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+
+  const switchTab = (tab: CreateTabMode) => {
+    if (isSubmitting) return;
+    setActiveTab(tab);
+    setStep("edit");
+  };
+
+  const goToPreview = () => setStep("preview");
+  const goToEdit = () => {
+    if (!isSubmitting) setStep("edit");
+  };
+
   // ३. Vent Submit Handler
   const handleVentSubmit = async () => {
-    if (!ventData.content.trim()) return;
+    if (!ventData.content.trim() || isSubmitting) return;
 
     try {
       setIsSubmitting(true);
@@ -78,7 +109,6 @@ function PostPageContent() {
         title: "Vent released into the void 🔥",
       });
 
-      // Destination community वा Home page मा पठाउने
       if (ventData.communitySlug) {
         router.push(`/c/${ventData.communitySlug}`);
       } else {
@@ -97,6 +127,8 @@ function PostPageContent() {
 
   // ४. Community Submit Handler
   const handleCommunitySubmit = async () => {
+    if (isSubmitting) return;
+
     if (!isAuthenticated || !user) {
       DarkToast.fire({
         icon: "warning",
@@ -113,7 +145,6 @@ function PostPageContent() {
         user.id
       );
 
-      // AuthContext र Sidebar मा नयाँ Owner Role तत्कालै Sync गर्ने
       const currentManaged = user.managedCommunities || [];
       updateUser({
         managedCommunities: [...currentManaged, managedRecord],
@@ -124,7 +155,6 @@ function PostPageContent() {
         title: `c/${managedRecord.slug} created! You are the Owner 🛡️`,
       });
 
-      // नयाँ कम्युनिटीको पृष्ठमा पठाउने
       router.push(`/c/${managedRecord.slug}`);
     } catch (err: unknown) {
       const errorMsg =
@@ -133,173 +163,261 @@ function PostPageContent() {
         icon: "error",
         title: errorMsg,
       });
+      // Slug मिलेन भने user ले form सच्याउन सकोस् भनेर edit मा फर्काउने
+      setStep("edit");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const isVent = activeTab === "vent";
+  const handleFinalSubmit = isVent ? handleVentSubmit : handleCommunitySubmit;
+
   return (
-    <main className="min-h-screen bg-[#050505] text-zinc-100 selection:bg-red-950 selection:text-red-200">
-      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        
-        {/* Header Bar */}
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
+    <main
+      className={`min-h-screen bg-[#050505] text-zinc-100 selection:bg-red-950 selection:text-red-200 ${
+        step === "preview" ? "pb-32" : "pb-10"
+      }`}
+    >
+      <div className="mx-auto max-w-2xl px-4 py-5 sm:px-6 sm:py-8">
+        {/* Header */}
+        <header className="mb-5 flex flex-col gap-4 border-b border-zinc-800/80 pb-5">
           <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/60 text-zinc-400 transition hover:border-zinc-700 hover:bg-zinc-800 hover:text-white"
-              title="Go back to Home"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <div>
-              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 text-lg font-bold text-white">
                 <span>Creation Studio</span>
                 <Sparkles className="h-4 w-4 text-amber-500" />
               </h1>
-              <p className="text-xs text-zinc-400">
-                Release your frustration into the void or build a safe venting community.
+              <p className="text-xs leading-snug text-zinc-400">
+                Release your frustration or build a safe venting community.
               </p>
             </div>
           </div>
 
-          {/* Segmented Tab Switcher */}
-          <div className="flex rounded-xl border border-zinc-800/80 bg-zinc-900/80 p-1">
+          {/* Tab Switcher: mobile मा पूरा चौडाइ */}
+          <div
+            role="tablist"
+            aria-label="Create type"
+            className="grid grid-cols-2 gap-1 rounded-xl border border-zinc-800/80 bg-zinc-900/80 p-1"
+          >
             <button
               type="button"
-              onClick={() => setActiveTab("vent")}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
-                activeTab === "vent"
+              role="tab"
+              aria-selected={isVent}
+              onClick={() => switchTab("vent")}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-all cursor-pointer ${
+                isVent
                   ? "bg-red-600 text-white shadow-lg shadow-red-950/50"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <Flame className="h-3.5 w-3.5" />
+              <Flame className="h-4 w-4" />
               <span>Drop a Vent</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveTab("community")}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
-                activeTab === "community"
+              role="tab"
+              aria-selected={!isVent}
+              onClick={() => switchTab("community")}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-all cursor-pointer ${
+                !isVent
                   ? "bg-amber-600 text-white shadow-lg shadow-amber-950/50"
                   : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <Shield className="h-3.5 w-3.5" />
+              <Shield className="h-4 w-4" />
               <span>Create Community</span>
             </button>
           </div>
-        </div>
 
-        {/* 2-Column Responsive Layout */}
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-          
-          {/* बायाँ स्तम्भ (Form Section - 7 Columns) */}
-          <section className="lg:col-span-7">
-            {activeTab === "vent" ? (
-              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 backdrop-blur-sm">
-                <h2 className="mb-1 text-sm font-bold text-white flex items-center gap-2">
-                  <Flame className="h-4 w-4 text-red-500" />
-                  <span>Write Your Confession</span>
-                </h2>
-                <p className="mb-4 text-xs text-zinc-400">
-                  Choose your destination, identity mode, and emotions below.
-                </p>
+          {/* Step indicator */}
+          <div className="flex items-center gap-2 text-xs font-medium" aria-label="Progress">
+            <span
+              className={`flex items-center gap-1.5 ${
+                step === "edit" ? "text-white" : "text-zinc-500"
+              }`}
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                  step === "edit" ? (isVent ? "bg-red-600" : "bg-amber-600") : "bg-zinc-800"
+                }`}
+              >
+                1
+              </span>
+              Write
+            </span>
+            <span className="h-px w-6 bg-zinc-700" />
+            <span
+              className={`flex items-center gap-1.5 ${
+                step === "preview" ? "text-white" : "text-zinc-500"
+              }`}
+            >
+              <span
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                  step === "preview" ? (isVent ? "bg-red-600" : "bg-amber-600") : "bg-zinc-800"
+                }`}
+              >
+                2
+              </span>
+              Preview &amp; publish
+            </span>
+          </div>
+        </header>
 
-                <VentComposer
-                  ventData={ventData}
-                  onChange={(updates) =>
-                    setVentData((prev) => ({ ...prev, ...updates }))
-                  }
-                  onSubmit={handleVentSubmit}
-                  isSubmitting={isSubmitting}
-                />
-              </div>
+        {/* STEP 1: EDIT */}
+        {step === "edit" && (
+          <section>
+            <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-4 backdrop-blur-sm sm:p-5">
+              {isVent ? (
+                <>
+                  <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-white">
+                    <Flame className="h-4 w-4 text-red-500" />
+                    <span>Write your confession</span>
+                  </h2>
+                  <p className="mb-5 text-xs text-zinc-400">
+                    Pick where to post, who you are, and how you feel. You can preview
+                    before it goes live.
+                  </p>
+                  <VentComposer
+                    ventData={ventData}
+                    onChange={(updates) =>
+                      setVentData((prev) => ({ ...prev, ...updates }))
+                    }
+                    onSubmit={async () => goToPreview()}
+                    isSubmitting={isSubmitting}
+                  />
+                </>
+              ) : (
+                <>
+                  <h2 className="mb-1 flex items-center gap-2 text-base font-bold text-white">
+                    <Shield className="h-4 w-4 text-amber-500" />
+                    <span>Launch a new venting hub</span>
+                  </h2>
+                  <p className="mb-5 text-xs text-zinc-400">
+                    Set the rules and privacy, then preview your community before
+                    creating it.
+                  </p>
+                  <CommunityCreator
+                    communityData={communityData}
+                    onChange={(updates) =>
+                      setCommunityData((prev) => ({ ...prev, ...updates }))
+                    }
+                    onSubmit={async () => goToPreview()}
+                    isSubmitting={isSubmitting}
+                  />
+                </>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* STEP 2: PREVIEW */}
+        {step === "preview" && (
+          <section className="flex flex-col gap-4">
+            <div className="flex items-center gap-2 px-1">
+              <Eye className="h-4 w-4 text-zinc-400" />
+              <h2 className="text-sm font-bold text-zinc-200">
+                {isVent ? "This is how your vent will look" : "This is how your community will look"}
+              </h2>
+            </div>
+
+            {isVent ? (
+              <LiveVentPreview ventData={ventData} />
             ) : (
-              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 backdrop-blur-sm">
-                <h2 className="mb-1 text-sm font-bold text-white flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-amber-500" />
-                  <span>Launch New Venting Hub</span>
-                </h2>
-                <p className="mb-4 text-xs text-zinc-400">
-                  Establish custom rules, identity filters, and claim ownership.
+              <div className="overflow-hidden rounded-2xl border border-zinc-800/90 bg-[#0c0c0e] p-4 shadow-2xl sm:p-5">
+                <div className="mb-3 flex items-start gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-amber-900/50 bg-amber-950/40 text-lg font-bold text-amber-400">
+                    c/
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-base font-bold text-zinc-100">
+                      {communityData.name || "Community Name"}
+                    </h3>
+                    <p className="truncate font-mono text-xs text-amber-500">
+                      c/{communityData.slug || "slug-preview"}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mb-4 min-h-[40px] break-words text-sm leading-relaxed text-zinc-300">
+                  {communityData.description ||
+                    "Your community mission statement will display here..."}
                 </p>
 
-                <CommunityCreator
-                  communityData={communityData}
-                  onChange={(updates) =>
-                    setCommunityData((prev) => ({ ...prev, ...updates }))
-                  }
-                  onSubmit={handleCommunitySubmit}
-                  isSubmitting={isSubmitting}
-                />
+                <div className="flex flex-wrap gap-2 border-t border-zinc-800/60 pt-3 text-xs text-zinc-400">
+                  <span className="flex items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1">
+                    <Users className="h-3 w-3" />
+                    <span>1 Member</span>
+                  </span>
+                  {communityData.isRestricted && (
+                    <span className="flex items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-amber-400">
+                      <Lock className="h-3 w-3" />
+                      <span>Restricted</span>
+                    </span>
+                  )}
+                  {communityData.isAnonymousOnly && (
+                    <span className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-300">
+                      Anonymous only
+                    </span>
+                  )}
+                  <span className="rounded border border-amber-800/40 bg-amber-950/40 px-2 py-1 font-semibold text-amber-300">
+                    Role: Owner
+                  </span>
+                </div>
               </div>
             )}
           </section>
-
-          {/* दायाँ स्तम्भ (Real-Time Live Preview - 5 Columns) */}
-          <aside className="lg:col-span-5">
-            <div className="sticky top-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                  {activeTab === "vent" ? "Live Feed Preview" : "Community Hub Preview"}
-                </span>
-                <span className="text-[10px] text-zinc-600">
-                  Real-time appearance
-                </span>
-              </div>
-
-              {activeTab === "vent" ? (
-                <LiveVentPreview ventData={ventData} />
-              ) : (
-                /* Community Hub Live Preview */
-                <div className="flex flex-col gap-4">
-                  <div className="overflow-hidden rounded-2xl border border-zinc-800/90 bg-[#0c0c0e] p-5 shadow-2xl">
-                    <div className="flex items-start gap-3 mb-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-900/50 bg-amber-950/40 text-amber-400 font-bold text-lg">
-                        c/
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-sm text-zinc-100 truncate">
-                          {communityData.name || "Community Name"}
-                        </h3>
-                        <p className="text-[11px] text-amber-500 font-mono">
-                          c/{communityData.slug || "slug-preview"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-zinc-400 leading-relaxed mb-4 min-h-[40px]">
-                      {communityData.description ||
-                        "Your community mission statement will display here..."}
-                    </p>
-
-                    <div className="flex flex-wrap gap-2 text-[10px] text-zinc-500 border-t border-zinc-800/60 pt-3">
-                      <span className="flex items-center gap-1 rounded bg-zinc-900 border border-zinc-800 px-2 py-0.5">
-                        <Users className="h-3 w-3 text-zinc-400" />
-                        <span>1 Member</span>
-                      </span>
-                      {communityData.isRestricted && (
-                        <span className="flex items-center gap-1 rounded bg-zinc-900 border border-zinc-800 px-2 py-0.5 text-amber-400">
-                          <Lock className="h-3 w-3" />
-                          <span>Restricted</span>
-                        </span>
-                      )}
-                      <span className="rounded bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 text-amber-300 font-semibold">
-                        Role: Owners
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </aside>
-
-        </div>
-
+        )}
       </div>
+
+      {/* Sticky action bar: preview step मा मात्र देखिन्छ */}
+      {step === "preview" && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-[#050505]/95 backdrop-blur">
+          <div
+            className="mx-auto flex max-w-2xl items-center gap-3 px-4 pt-3 sm:px-6"
+            style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))" }}
+          >
+            <button
+              type="button"
+              onClick={goToEdit}
+              disabled={isSubmitting}
+              className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-zinc-400"
+            >
+              <Pencil className="h-4 w-4" />
+              <span>Edit</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleFinalSubmit}
+              disabled={isSubmitting}
+              className={`flex min-h-12 flex-[2] items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-white ${
+                isVent
+                  ? "bg-red-600 shadow-red-950/50 hover:bg-red-500"
+                  : "bg-amber-600 shadow-amber-950/50 hover:bg-amber-500"
+              }`}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{isVent ? "Publishing..." : "Creating..."}</span>
+                </>
+              ) : isVent ? (
+                <>
+                  <Send className="h-4 w-4" />
+                  <span>Release vent 🔥</span>
+                </>
+              ) : (
+                <>
+                  <Shield className="h-4 w-4" />
+                  <span>Create community 🛡️</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
