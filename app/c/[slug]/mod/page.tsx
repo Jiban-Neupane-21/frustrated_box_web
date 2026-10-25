@@ -48,7 +48,7 @@ export default async function CommunityModPage({
           </div>
           <p className="mt-2 text-2xl font-black text-white">12,420</p>
           <p className="mt-0.5 text-[11px] text-zinc-500">Active venters</p>
-        </div>
+        </div> 
       </div>
 
       <div className="rounded-2xl border border-dashed border-zinc-800 p-6 text-center text-xs text-zinc-500">

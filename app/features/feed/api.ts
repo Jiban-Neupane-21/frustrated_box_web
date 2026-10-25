@@ -172,17 +172,31 @@ export async function toggleBurn(
 /**
  * Local Append for New Vent (when user posts via composer)
  */
+/**
+ * Local Append for New Vent (when user posts via composer)
+ */
 export async function createConfession(
   content: string,
   autoTags: string[],
+  options?: {
+    alias?: string;
+    isAnonymous?: boolean;
+    authorId?: string;
+  }
 ): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const isAnon = options?.isAnonymous ?? true;
+  const authorAlias = isAnon
+    ? `Anonymous #${Math.floor(100 + Math.random() * 900)}`
+    : (options?.alias || "Anonymous");
 
   const newPost = {
     id: `confession-${Date.now()}`,
     author: {
-      alias: `Anonymous #${Math.floor(100 + Math.random() * 900)}`,
-      isAnonymous: true,
+      id: isAnon ? undefined : options?.authorId,
+      alias: authorAlias,
+      isAnonymous: isAnon,
     },
     content,
     tags: autoTags,
@@ -294,4 +308,7 @@ export async function toggleFollowAuthor(
   return {
     isFollowing: !isAlreadyFollowing,
   };
+  
 }
+
+
