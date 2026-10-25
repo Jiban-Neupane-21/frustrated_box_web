@@ -119,6 +119,9 @@ export function AppShell({ children, session = null }: AppShellProps) {
     }
   };
 
+  // RightPanel कुन-कुन फराकिलो पेजहरूमा लुकाउने (जस्तै: /post मा २ वटा स्तम्भ अट्न ठाउँ चाहिन्छ)
+const isWideRoute = pathname.startsWith("/post") || pathname.startsWith("/admin");
+
   return (
     <div className="flex min-h-screen flex-col bg-[#050505] text-zinc-100 selection:bg-red-900/60 selection:text-red-200">
       {/* Mobile & Tablet Top Navbar (< 1024px) */}
@@ -130,25 +133,28 @@ export function AppShell({ children, session = null }: AppShellProps) {
         onRequestLogout={() => setIsLogoutModalOpen(true)}
       />
 
-      {/* 3-Column Responsive Shell */}
-      <div className="mx-auto flex w-full max-w-7xl flex-1 justify-center px-0 sm:px-4 lg:px-6">
-        {/* Left Column: Twitter-style Sidebar (Desktop >= 1024px) */}
-        <DesktopSidebar
-          session={currentSession}
-          navMode={navMode}
-          activeCommunity={activeCommunity}
-          onSwitchMode={handleSwitchMode}
-          onRequestLogout={() => setIsLogoutModalOpen(true)}
-        />
+     <div className="mx-auto flex w-full max-w-[1500px] flex-1 justify-between lg:justify-center lg:gap-4 xl:gap-8 px-2 sm:px-4 lg:px-6">
+  {/* Left Sidebar */}
+  <DesktopSidebar
+    session={currentSession}
+    navMode={navMode}
+    activeCommunity={activeCommunity}
+    onSwitchMode={handleSwitchMode}
+    onRequestLogout={() => setIsLogoutModalOpen(true)}
+  />
 
-        {/* Center Column: Main Feed / Page Content */}
-        <div className="min-h-screen min-w-0 max-w-2xl flex-1 border-zinc-800/60 lg:border-x">
-          {children}
-        </div>
+  {/* Center Column: अब ६७२px बाट बढेर ७६८px (max-w-3xl) सम्म फराकिलो हुन्छ */}
+  <div
+    className={`min-h-screen min-w-0 flex-1 border-zinc-800/60 lg:border-x ${
+      isWideRoute ? "max-w-5xl" : "max-w-2xl xl:max-w-3xl"
+    }`}
+  >
+    {children}
+  </div>
 
-        {/* Right Column: Trending & Discovery panel (Desktop >= 1280px) */}
-        <RightPanel />
-      </div>
+  {/* Right Panel: /post वा /admin मा लुक्छ, होमपेजमा दायाँ किनारतिर सन्तुलित भएर बस्छ */}
+  {!isWideRoute && <RightPanel />}
+</div>
 
       {/* Root-level Logout Modal: session clear bhayera Navbar unmount huda pani yo safe rahanchha */}
       <LogoutConfirmModal
