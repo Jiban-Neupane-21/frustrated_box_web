@@ -60,7 +60,6 @@ export function ExplorePostCard({ post }: ExplorePostCardProps) {
               {post.authorTag ? `${post.authorTag} • ` : ""}
               {post.createdAt}
             </span>
-            s
           </div>
         </div>
 
