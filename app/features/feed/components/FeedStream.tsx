@@ -34,7 +34,11 @@ function ConfessionSkeleton() {
   );
 }
 
-export function FeedStream() {
+export function FeedStream({
+  community = null,
+}: {
+  community?: string | null;
+}) {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
   const [items, setItems] = useState<Confession[]>([]);
@@ -105,6 +109,7 @@ export function FeedStream() {
         cursor,
         sort,
         tag: selectedTag,
+        community,
       });
       setItems((prev) => [...prev, ...res.items]);
       setCursor(res.nextCursor);
@@ -114,8 +119,7 @@ export function FeedStream() {
     } finally {
       setIsFetchingNext(false);
     }
-  }, [isFetchingNext, hasMore, cursor, sort, selectedTag]);
-
+  }, [isFetchingNext, hasMore, cursor, sort, selectedTag, community]);
   // Fetch initial feed or when filters change
   useEffect(() => {
     let ignore = false;
@@ -127,7 +131,9 @@ export function FeedStream() {
           cursor: null,
           sort,
           tag: selectedTag,
+          community,
         });
+
         if (!ignore) {
           setItems(res.items);
           setCursor(res.nextCursor);
@@ -149,7 +155,7 @@ export function FeedStream() {
     return () => {
       ignore = true;
     };
-  }, [sort, selectedTag]);
+  }, [sort, selectedTag, community]);
 
   const SORT_TABS = [
     {
@@ -218,7 +224,9 @@ export function FeedStream() {
             <p className="text-sm text-zinc-400">
               {sort === "following"
                 ? "You haven't followed any authors yet. Explore the feed and follow people to see their thoughts here! 👻"
-                : "No confessions found for this filter."}
+                : community
+                  ? "No confessions in this community yet. Be the first to vent! 🔥"
+                  : "No confessions found for this filter."}
             </p>
           </div>
         ) : (

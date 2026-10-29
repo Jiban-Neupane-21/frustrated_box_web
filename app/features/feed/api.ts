@@ -30,7 +30,9 @@ let confessionsStore = baseConfessions; // legacy reference (likes/burns को 
 // Store sync helper
 function updateConfessionInStores(
   id: string,
-  updater: (item: (typeof MOCK_CONFESSIONS)[number]) => (typeof MOCK_CONFESSIONS)[number],
+  updater: (
+    item: (typeof MOCK_CONFESSIONS)[number],
+  ) => (typeof MOCK_CONFESSIONS)[number],
 ) {
   const apply = (arr: (typeof MOCK_CONFESSIONS)[number][]) => {
     const idx = arr.findIndex((c) => c.id === id);
@@ -47,8 +49,13 @@ function updateConfessionInStores(
 export async function fetchFeed(
   params: FeedQueryParams = {},
 ): Promise<PaginatedFeedResponse> {
-  const { limit = 5, cursor = null, sort = "for_you", tag = null } = params;
-  // Simulate network latency (450ms) to test loading skeletons
+  const {
+    limit = 5,
+    cursor = null,
+    sort = "for_you",
+    tag = null,
+    community = null,
+  } = params; // Simulate network latency (450ms) to test loading skeletons
   await new Promise((resolve) => setTimeout(resolve, 450));
 
   // cursor नभएमा (fresh load / refresh) → नयाँ random shuffle गर्ने
@@ -64,6 +71,11 @@ export async function fetchFeed(
     filtered = filtered.filter((item) =>
       item.tags.some((t) => t.toLowerCase() === normalizedTag),
     );
+  }
+
+  // 1b. Community Filter (e.g., /c/tech-life)
+  if (community) {
+    filtered = filtered.filter((item) => item.communitySlug === community);
   }
 
   // 2. Sorting & Following Filter Logic
@@ -182,14 +194,15 @@ export async function createConfession(
     alias?: string;
     isAnonymous?: boolean;
     authorId?: string;
-  }
+    communitySlug?: string | null;
+  },
 ): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   const isAnon = options?.isAnonymous ?? true;
   const authorAlias = isAnon
     ? `Anonymous #${Math.floor(100 + Math.random() * 900)}`
-    : (options?.alias || "Anonymous");
+    : options?.alias || "Anonymous";
 
   const newPost = {
     id: `confession-${Date.now()}`,
@@ -200,6 +213,8 @@ export async function createConfession(
     },
     content,
     tags: autoTags,
+    communitySlug: options?.communitySlug ?? null, // 👈 yo matra naya line
+
     relateCount: 0,
     burnCount: 0,
     echoCount: 0,
@@ -308,7 +323,4 @@ export async function toggleFollowAuthor(
   return {
     isFollowing: !isAlreadyFollowing,
   };
-  
 }
-
-

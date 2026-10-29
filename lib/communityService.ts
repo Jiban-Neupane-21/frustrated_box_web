@@ -1,5 +1,5 @@
 // lib/communityService.ts
-import { COMMUNITY_SLUGS } from "@/lib/communities";
+import { COMMUNITY_SLUGS, getDefaultCommunities, type CommunityMeta } from "@/lib/communities";
 import { CreateCommunityInput } from "@/types/create";
 import { ManagedCommunity } from "@/types/auth";
 
@@ -11,6 +11,8 @@ export interface CommunityRecord extends CreateCommunityInput {
 }
 
 const STORAGE_KEY = "fb_custom_communities";
+const JOINED_KEY = "fb_joined_communities";
+export const JOINED_EVENT = "fb_joined_changed";
 
 export const communityService = {
   // १. नामबाट सफा URL Slug बनाउने (e.g. "Dev Life!" -> "dev-life")
@@ -87,21 +89,75 @@ export const communityService = {
     return { community: newCommunity, managedRecord };
   },
 
-  // ५. Dropdown को लागि सबै कम्युनिटीहरू (Default + Custom) ल्याउने
-  getAllCommunityOptions: (): { name: string; slug: string }[] => {
-    const defaultList = (COMMUNITY_SLUGS as readonly string[]).map((slug) => ({
-      name: slug
-        .split("-")
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" "),
-      slug,
-    }));
 
-    const customList = communityService.getCustomCommunities().map((c) => ({
-      name: c.name,
-      slug: c.slug,
-    }));
+    // ६. Custom record -> CommunityMeta (default sanga same shape)
+  toMeta: (c: CommunityRecord): CommunityMeta => ({
+    slug: c.slug,
+    name: c.name,
+    description: c.description,
+    category: c.category,
+    membersCount: c.membersCount,
+    initials: c.name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w.charAt(0).toUpperCase())
+      .join(""),
+    accentColor: c.accentColor ?? "#6B7280",
+    rules: c.rules ?? [],
+    isRestricted: c.isRestricted ?? false,
+    isAnonymousOnly: c.isAnonymousOnly ?? false,
+    isCustom: true,
+  }),
 
-    return [...defaultList, ...customList];
+  // ७. Default + Custom merge
+  getAllCommunities: (): CommunityMeta[] => {
+    const custom = communityService
+      .getCustomCommunities()
+      .map(communityService.toMeta);
+    return [...getDefaultCommunities(), ...custom];
   },
+
+  // ८. Slug bata euta community (default pahile, tespachi custom)
+  getCommunityBySlug: (slug: string): CommunityMeta | undefined => {
+    const clean = slug.toLowerCase().trim();
+    return communityService.getAllCommunities().find((c) => c.slug === clean);
+  },
+
+
+    // 9. Joined slugs
+  getJoinedSlugs: (): string[] => {
+    if (typeof window === "undefined") return [];
+    try {
+      const data = localStorage.getItem(JOINED_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  isJoined: (slug: string): boolean =>
+    communityService.getJoinedSlugs().includes(slug),
+
+  // Join/Leave toggle, naya state return garcha
+  toggleJoin: (slug: string): boolean => {
+    const current = communityService.getJoinedSlugs();
+    const nowJoined = !current.includes(slug);
+    const next = nowJoined
+      ? [...current, slug]
+      : current.filter((s) => s !== slug);
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(JOINED_KEY, JSON.stringify(next));
+      window.dispatchEvent(new Event(JOINED_EVENT)); // sidebar lai sync garna
+    }
+    return nowJoined;
+  },
+
+  
+  // ५ (replace). Dropdown options, aba real name bata
+  getAllCommunityOptions: (): { name: string; slug: string }[] =>
+    communityService
+      .getAllCommunities()
+      .map((c) => ({ name: c.name, slug: c.slug })),
 };

@@ -13,14 +13,16 @@ export interface ConfessionComment {
   content: string;
   createdAt: string;
 
-  parentId?: string; 
+  parentId?: string;
   replyToAlias?: string;
-  replies?: ConfessionComment[]; 
+  replies?: ConfessionComment[];
 }
 
 export interface Confession {
   id: string;
   author: ConfessionAuthor;
+  communitySlug?: string | null; // naya: null/undefined bhaye Global feed ko post
+
   content: string;
   tags: string[]; // dynamic organic tags (#overtime, #exams, #breakup)
   semanticCluster?: string; // auto-detected cluster (e.g. workplace-burnout)
@@ -40,6 +42,7 @@ export interface FeedQueryParams {
   cursor?: string | null;
   sort?: FeedSortOption;
   tag?: string | null; // optional filter by organic tag
+  community?: string | null; // naya: slug bata filter
 }
 
 export interface PaginatedFeedResponse {

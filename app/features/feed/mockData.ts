@@ -1,6 +1,7 @@
 // app/features/feed/mockData.ts
 import { Confession } from "./types";
 import { BULK_CONFESSIONS } from "./mockConfessionsBulk";
+import type { CommunitySlug } from "@/lib/communities";
 
 /**
  * =====================================================================
@@ -387,8 +388,92 @@ export const BASE_CONFESSIONS: Confession[] = [
     ],
   },
 ];
+/**
+ * =====================================================================
+ * COMMUNITY TAGGING
+ * Har confession lai kun community ko ho bhanera auto-tag garne.
+ * 1. Specific tag le pahile (generic tag jastai anxiety/loneliness chhodieko)
+ * 2. Tespachi semanticCluster fallback
+ * =====================================================================
+ */
+const TAG_TO_COMMUNITY: Record<string, CommunitySlug> = {
+  // tech-life
+  techlife: "tech-life",
+  prod: "tech-life",
+  prodcrash: "tech-life",
+  deploy: "tech-life",
+  kubernetes: "tech-life",
+  programming: "tech-life",
+  techjobs: "tech-life",
+  // corporate-cage
+  corporate: "corporate-cage",
+  meetings: "corporate-cage",
+  management: "corporate-cage",
+  toxicboss: "corporate-cage",
+  micromanagement: "corporate-cage",
+  office: "corporate-cage",
+  overtime: "corporate-cage",
+  clienthorror: "corporate-cage",
+  // happy-mask
+  happymask: "happy-mask",
+  healthcare: "happy-mask",
+  exhaustion: "happy-mask",
+  // midnight-thoughts
+  midnight: "midnight-thoughts",
+  unspoken: "midnight-thoughts",
+  // heartbreak-hotel
+  heartbreak: "heartbreak-hotel",
+  breakup: "heartbreak-hotel",
+  // academic-chaos
+  academics: "academic-chaos",
+  csit: "academic-chaos",
+  exams: "academic-chaos",
+  collegelife: "academic-chaos",
+  backlog: "academic-chaos",
+  semester: "academic-chaos",
+  assignment: "academic-chaos",
+  studentlife: "academic-chaos",
+  examhall: "academic-chaos",
+};
+
+const CLUSTER_TO_COMMUNITY: Record<string, CommunitySlug | "split-work"> = {
+  "workplace-burnout": "split-work", // tech-life / corporate-cage ma baadne
+  "future-anxiety": "midnight-thoughts",
+  "heartbreak-solitude": "heartbreak-hotel",
+  "heartbreak-frustration": "heartbreak-hotel",
+  "academic-stress": "academic-chaos",
+};
+
+function withCommunity(c: Confession): Confession {
+  // Pahile nai set bhayeko cha bhane nachhunu
+  if (c.communitySlug !== undefined) return c;
+
+  // 1. Specific tag
+  for (const t of c.tags) {
+    const hit = TAG_TO_COMMUNITY[t.toLowerCase()];
+    if (hit) return { ...c, communitySlug: hit };
+  }
+
+  // 2. Cluster fallback
+  const mapped = c.semanticCluster
+    ? CLUSTER_TO_COMMUNITY[c.semanticCluster]
+    : undefined;
+
+  if (!mapped) return { ...c, communitySlug: null };
+
+  if (mapped === "split-work") {
+    // Deterministic split: reload garda pani same community ma parcha
+    const sum = [...c.id].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+    return {
+      ...c,
+      communitySlug: sum % 2 === 0 ? "tech-life" : "corporate-cage",
+    };
+  }
+
+  return { ...c, communitySlug: mapped };
+}
 
 export const MOCK_CONFESSIONS: Confession[] = [
   ...BASE_CONFESSIONS,
   ...BULK_CONFESSIONS,
-];
+].map(withCommunity);
