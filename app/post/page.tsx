@@ -1,4 +1,3 @@
-// app/post/page.tsx
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
@@ -22,6 +21,7 @@ import { LiveVentPreview } from "./components/LiveVentPreview";
 import { CommunityCreator } from "./components/CommunityCreator";
 import { createConfession } from "@/app/features/feed/api";
 import { communityService } from "@/lib/communityService";
+import { notificationService } from "@/lib/notificationService"; // <--- ADDED IMPORT
 import { useAuth } from "@/components/AuthContext";
 import { DarkToast } from "@/lib/swal";
 
@@ -91,17 +91,32 @@ function PostPageContent() {
     if (!isSubmitting) setStep("edit");
   };
 
-  // ३. Vent Submit Handler
+  // ३. Vent Submit Handler with Notification Dispatch
   const handleVentSubmit = async () => {
     if (!ventData.content.trim() || isSubmitting) return;
 
     try {
       setIsSubmitting(true);
 
-      await createConfession(ventData.content, ventData.tags, {
-        alias: user?.name || user?.username,
+      const createdPost = await createConfession(ventData.content, ventData.tags, {
+        alias: ventData.isAnonymous ? "Anonymous" : user?.name || user?.username,
         isAnonymous: ventData.isAnonymous,
         authorId: user?.id,
+        communitySlug: ventData.communitySlug || null,
+      });
+
+      const postId = createdPost?.id || `vent_${Date.now()}`;
+      const authorId = ventData.isAnonymous ? "anonymous" : user?.id || "current_user";
+      const authorName = ventData.isAnonymous
+        ? "Anonymous User"
+        : user?.username || user?.name || "User";
+
+      // Dispatch notifications to Followers, Interacted Users, and Joined Community Members
+      notificationService.dispatchNewPostNotifications({
+        postId,
+        authorId,
+        authorName,
+        communitySlug: ventData.communitySlug || null,
       });
 
       DarkToast.fire({
@@ -194,7 +209,7 @@ function PostPageContent() {
             </div>
           </div>
 
-          {/* Tab Switcher: mobile मा पूरा चौडाइ */}
+          {/* Tab Switcher */}
           <div
             role="tablist"
             aria-label="Create type"
@@ -371,7 +386,7 @@ function PostPageContent() {
         )}
       </div>
 
-      {/* Sticky action bar: preview step मा मात्र देखिन्छ */}
+      {/* Sticky action bar */}
       {step === "preview" && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-800 bg-[#050505]/95 backdrop-blur">
           <div

@@ -11,6 +11,7 @@ import { AuthButtons } from "./components/auth-buttons";
 import { UserDropdown } from "./components/user_menu";
 import { CommunityModBar } from "./components/community-mod-bar";
 import { PlatformAdminBar } from "./components/platform-admin-bar";
+import { NavbarNotificationBell } from "./NotificationBell";
 
 interface NavbarProps {
   session?: UserSession | null;
@@ -102,15 +103,7 @@ export function Navbar({
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">
               {session ? (
                 <div className="flex items-center gap-2">
-                  <Link
-                    href="/notifications"
-                    className="relative flex h-8 w-8 items-center justify-center  text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200"
-                    aria-label="View notifications"
-                  >
-                    <Bell className="h-4 w-4" />
-                    <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-red-600 ring-2 ring-[#050505]" />
-                  </Link>
-
+                <NavbarNotificationBell />
                   <UserDropdown
                     session={session}
                     onSwitchMode={handleSwitchMode}

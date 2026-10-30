@@ -196,7 +196,7 @@ export async function createConfession(
     authorId?: string;
     communitySlug?: string | null;
   },
-): Promise<void> {
+): Promise<{ id: string }> {
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   const isAnon = options?.isAnonymous ?? true;
@@ -229,6 +229,7 @@ export async function createConfession(
     newPost as (typeof MOCK_CONFESSIONS)[number],
     ...currentSessionOrder,
   ];
+  return { id: newPost.id };
 }
 
 /**

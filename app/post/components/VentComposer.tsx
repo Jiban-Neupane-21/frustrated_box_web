@@ -1,10 +1,10 @@
-// app/post/components/VentComposer.tsx
 "use client";
 
 import React from "react";
-import { EyeOff, User, AlertTriangle, Eye } from "lucide-react";
+import { EyeOff, User, Eye, Users } from "lucide-react";
 import { CreateVentInput } from "@/types/create";
 import { useAuth } from "@/components/AuthContext";
+import { getDefaultCommunities } from "@/lib/communities";
 
 const TAG_REGEX = /#[a-zA-Z0-9_]+/g;
 const MAX_TAGS = 10;
@@ -32,6 +32,7 @@ export function VentComposer({
   isSubmitting,
 }: VentComposerProps) {
   const { user, isAuthenticated } = useAuth();
+  const communities = getDefaultCommunities();
 
   const currentChars = ventData.content.length;
   const charsRemaining = MAX_CHARS - currentChars;
@@ -102,7 +103,28 @@ export function VentComposer({
         )}
       </fieldset>
 
-      {/* 2. Content */}
+      {/* 2. Select Community (Optional) */}
+      <div>
+        <label htmlFor="vent-community" className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-200">
+          <Users className="h-4 w-4 text-red-500" />
+          <span>Post to a Community (Optional)</span>
+        </label>
+        <select
+          id="vent-community"
+          value={ventData.communitySlug || ""}
+          onChange={(e) => onChange({ communitySlug: e.target.value || null })}
+          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-200 outline-none transition focus:border-red-600 focus:ring-1 focus:ring-red-600"
+        >
+          <option value="">Global Public Feed (No Community)</option>
+          {communities.map((c) => (
+            <option key={c.slug} value={c.slug}>
+              c/{c.slug} — {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* 3. Content */}
       <div>
         <div className="mb-2 flex items-center justify-between gap-3">
           <label htmlFor="vent-content" className="text-sm font-semibold text-zinc-200">
@@ -124,7 +146,6 @@ export function VentComposer({
           Tip: type #work or #exams inside your vent and it becomes a tag.
         </p>
       </div>
-
 
       {/* 4. Preview button */}
       <div className="flex flex-col gap-2 pt-1">
