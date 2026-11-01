@@ -26,7 +26,7 @@ export function AppShell({ children, session = null }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   // Local manual mode fallback when not on dedicated URL route
@@ -88,6 +88,9 @@ export function AppShell({ children, session = null }: AppShellProps) {
 
   // 3. AUTO-BOUNCE: If user logs out while on a protected route, redirect to /login immediately
   useEffect(() => {
+    // 1. Auth data localStorage bata load hudhaichha bhane roknus
+    if (isLoading) return;
+
     if (!isAuthenticated || !user) {
       if (isPlatformAdminRoute || isCommunityAdminRoute) {
         router.replace("/login");
@@ -96,11 +99,11 @@ export function AppShell({ children, session = null }: AppShellProps) {
   }, [
     isAuthenticated,
     user,
+    isLoading, // Dependency ma isLoading thapne
     isPlatformAdminRoute,
     isCommunityAdminRoute,
     router,
   ]);
-
   const handleSwitchMode = (mode: NavMode, communitySlug?: string) => {
     // Prevent unauthenticated mode switches
     if (!currentSession) {
@@ -120,7 +123,8 @@ export function AppShell({ children, session = null }: AppShellProps) {
   };
 
   // RightPanel कुन-कुन फराकिलो पेजहरूमा लुकाउने (जस्तै: /post मा २ वटा स्तम्भ अट्न ठाउँ चाहिन्छ)
-const isWideRoute = pathname.startsWith("/post") || pathname.startsWith("/admin");
+  const isWideRoute =
+    pathname.startsWith("/post") || pathname.startsWith("/admin");
 
   return (
     <div className="flex min-h-screen flex-col bg-[#050505] text-zinc-100 selection:bg-red-900/60 selection:text-red-200">
@@ -133,28 +137,28 @@ const isWideRoute = pathname.startsWith("/post") || pathname.startsWith("/admin"
         onRequestLogout={() => setIsLogoutModalOpen(true)}
       />
 
-     <div className="mx-auto flex w-full max-w-[1500px] flex-1 justify-between lg:justify-center lg:gap-4 xl:gap-8 px-2 sm:px-4 lg:px-6">
-  {/* Left Sidebar */}
-  <DesktopSidebar
-    session={currentSession}
-    navMode={navMode}
-    activeCommunity={activeCommunity}
-    onSwitchMode={handleSwitchMode}
-    onRequestLogout={() => setIsLogoutModalOpen(true)}
-  />
+      <div className="mx-auto flex w-full max-w-[1500px] flex-1 justify-between lg:justify-center lg:gap-4 xl:gap-8 px-2 sm:px-4 lg:px-6">
+        {/* Left Sidebar */}
+        <DesktopSidebar
+          session={currentSession}
+          navMode={navMode}
+          activeCommunity={activeCommunity}
+          onSwitchMode={handleSwitchMode}
+          onRequestLogout={() => setIsLogoutModalOpen(true)}
+        />
 
-  {/* Center Column: अब ६७२px बाट बढेर ७६८px (max-w-3xl) सम्म फराकिलो हुन्छ */}
-  <div
-    className={`min-h-screen min-w-0 flex-1 border-zinc-800/60 lg:border-x ${
-      isWideRoute ? "max-w-5xl" : "max-w-2xl xl:max-w-3xl"
-    }`}
-  >
-    {children}
-  </div>
+        {/* Center Column: अब ६७२px बाट बढेर ७६८px (max-w-3xl) सम्म फराकिलो हुन्छ */}
+        <div
+          className={`min-h-screen min-w-0 flex-1 border-zinc-800/60 lg:border-x ${
+            isWideRoute ? "max-w-5xl" : "max-w-2xl xl:max-w-3xl"
+          }`}
+        >
+          {children}
+        </div>
 
-  {/* Right Panel: /post वा /admin मा लुक्छ, होमपेजमा दायाँ किनारतिर सन्तुलित भएर बस्छ */}
-  {!isWideRoute && <RightPanel />}
-</div>
+        {/* Right Panel: /post वा /admin मा लुक्छ, होमपेजमा दायाँ किनारतिर सन्तुलित भएर बस्छ */}
+        {!isWideRoute && <RightPanel />}
+      </div>
 
       {/* Root-level Logout Modal: session clear bhayera Navbar unmount huda pani yo safe rahanchha */}
       <LogoutConfirmModal
