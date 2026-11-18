@@ -68,15 +68,15 @@ function defineProp(obj, name, options) {
     if (!hasOwnProperty.call(obj, name)) Object.defineProperty(obj, name, options);
 }
 function getOverwrittenModule(moduleCache, id) {
-    let module = moduleCache[id];
-    if (!module) {
+    let module = moduleCache.get(id);
+    if (module === undefined) {
         if (createModuleWithDirectionFlag) {
             // set in development modes for hmr support
             module = createModuleWithDirection(id);
         } else {
             module = createModuleObject(id);
         }
-        moduleCache[id] = module;
+        moduleCache.set(id, module);
     }
     return module;
 }
@@ -101,6 +101,9 @@ function createModuleWithDirection(id) {
     };
 }
 const BindingTag_Value = 0;
+/**
+ * Terminates a module's group of entries in an {@link EsmReexports} list.
+ */ const REEXPORT_GROUP_END = 0;
 /**
  * Adds the getters to the exports object.
  */ function esm(exports, bindings, dynamic) {
@@ -166,6 +169,116 @@ const BindingTag_Value = 0;
     esm(exports, bindings, dynamic);
 }
 contextPrototype.s = esmExport;
+/**
+ * Registers re-exports that all forward to properties of other modules.
+ *
+ * This is a compact spelling of the pattern
+ *
+ * ```js
+ * var ns = context.i(moduleId)
+ * context.s([exportName, () => ns[importedName], ...])
+ * ```
+ *
+ * The list is a flat sequence of groups. Each group starts with the source the exports come from,
+ * followed by that group's entries, and is terminated by the `0` sentinel (or the end of the list).
+ *
+ * The group head is either a **module id**, which is instantiated here:
+ *
+ * ```js
+ * context.S([
+ *   76061, 'default', 'f', 'named', 'A', 0,
+ *   29842, 'otherModule', 'f',
+ * ])
+ * ```
+ *
+ * or the **namespace value** of a module that has already been imported, which is used directly:
+ *
+ * ```js
+ * var ns1 = context.i(76061)
+ * context.S([ns1, 'default', 'f', 'named', 'A'])
+ * ```
+ *
+ * The producer picks the namespace form when it has generated the import anyway -- because some
+ * later import must not be reordered past it -- so nothing is instantiated twice. The two are told
+ * apart by type: a module id is always a string or number. A CommonJS function export produces a
+ * callable namespace value, so namespace heads can be functions as well as objects.
+ *
+ * Entries are `exportName, importedName` pairs, except when a group holds exactly one string. That
+ * string is then a comma-joined list of the same pairs, which saves the repeated quoting:
+ *
+ * ```js
+ * context.S([
+ *   76061, 'default,f,named,A', 0,
+ *   29842, 'otherModule,f',
+ * ])
+ * ```
+ *
+ * The producer picks that spelling independently for each group whose names contain no commas,
+ * since that group's names are recovered by splitting on them.
+ *
+ * Groups whose head is a module id are instantiated in list order, at the point where the call
+ * appears, so the producer must not merge such a group across an import of another module. The
+ * destination reuses a source data value or getter descriptor when one exists, falling back to a
+ * wrapper getter for dynamic/proxy/inherited properties.
+ *
+ * `id` names the module the exports belong to when this module was merged into a scope-hoisting
+ * group, exactly as it does for {@link EsmExport}.
+ *
+ * Only the source descriptor's payload (value or getter) is reused. {@link esm} still defines a
+ * fresh enumerable, non-configurable destination property, and no source setter is ever forwarded.
+ */ function esmReexport(list, id) {
+    const bindings = [];
+    let i = 0;
+    while(i < list.length){
+        const head = list[i++];
+        const start = i;
+        while(i < list.length && list[i] !== REEXPORT_GROUP_END)i++;
+        const end = i;
+        // Skip the sentinel, if this group was terminated by one rather than by the end of the list.
+        i++;
+        // Module ids are always strings or numbers. Other values are already-imported namespaces;
+        // notably, interop with a CommonJS function export produces a callable namespace function.
+        // `esmImport` may return a promise for an async module, but re-exports of async modules keep
+        // going through `context.s`, so the producer never routes them here and this stays synchronous.
+        const namespace = typeof head === 'string' || typeof head === 'number' ? esmImport.call(this, head) : head;
+        if (end - start === 1) {
+            const pairs = list[start].split(',');
+            for(let j = 0; j < pairs.length; j += 2){
+                appendReexportBinding(bindings, pairs[j], namespace, pairs[j + 1]);
+            }
+        } else {
+            for(let j = start; j < end; j += 2){
+                appendReexportBinding(bindings, list[j], namespace, list[j + 1]);
+            }
+        }
+    }
+    esmExport.call(this, bindings, id);
+}
+contextPrototype.S = esmReexport;
+function appendReexportBinding(bindings, exportedName, namespace, importedName) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(namespace, importedName);
+    if (descriptor) {
+        if ('value' in descriptor) {
+            // Code generation only routes immutable imported bindings through this helper, so a data
+            // descriptor is a constant export and can be captured once.
+            bindings.push(exportedName, BindingTag_Value, descriptor.value);
+            return;
+        }
+        if (descriptor.get) {
+            // Accessors remain live by reusing the source getter. `esmReexport` is only called by
+            // generated code: every group head is either produced by
+            // `this.i` or is the namespace variable from a generated `this.i` call. Every getter on such
+            // a namespace is receiver-independent: ESM bindings are compiler-generated arrow functions,
+            // and the CommonJS/dynamic-namespace paths create arrows in `createGetter` and
+            // `getOwnPropertyDescriptor`. The destination can therefore reuse the exact function instead
+            // of allocating another wrapper getter.
+            bindings.push(exportedName, descriptor.get);
+            return;
+        }
+    }
+    // Dynamic/proxy/inherited CommonJS edge cases may not expose a usable own descriptor.
+    bindings.push(exportedName, ()=>namespace[importedName]);
+}
 function ensureDynamicExports(module, exports) {
     let reexportedObjects = REEXPORTED_OBJECTS.get(module);
     if (!reexportedObjects) {
@@ -526,6 +639,14 @@ contextPrototype.U = relativeURL;
     return `Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available.`;
 }
 /**
+ * Returns a `file://` URL under a synthetic directory named after `root`
+ * (`ROOT` for the project root), for when the real filesystem path is unknown.
+ * The root name and path segments are percent-encoded so the result is always
+ * a valid file URI.
+ */ function placeholderFileUrl(modulePath, root) {
+    return `file:///${encodeURIComponent(root ?? 'ROOT')}/${modulePath.split('/').map(encodeURIComponent).join('/')}`;
+}
+/**
  * A stub function to make `require` available but non-functional in ESM.
  */ function requireStub(_moduleId) {
     throw new Error('dynamic usage of require is not supported');
@@ -740,12 +861,19 @@ const ABSOLUTE_ROOT = path.resolve(__filename, relativePathToDistRoot);
 }
 Context.prototype.P = resolveAbsolutePath;
 /**
- * Returns an absolute `file://` URL for the given module path.
+ * Returns an absolute `file://` URL for the given module path, which is
+ * relative to the project root or the named `root`.
  *
  * Uses `url.pathToFileURL` so that the resulting URL is a valid file URI on
  * all platforms (forward slashes on Windows, drive letters handled
  * correctly, path segments URL-encoded).
- */ function resolveFileUrl(modulePath) {
+ *
+ * The location of a named `root` isn't known at runtime (the output may have
+ * been moved away from the sources), so this returns a placeholder URL for it.
+ */ function resolveFileUrl(modulePath, root) {
+    if (root !== undefined) {
+        return placeholderFileUrl(modulePath, root);
+    }
     return require('url').pathToFileURL(resolveAbsolutePath(modulePath)).href;
 }
 Context.prototype.F = resolveFileUrl;
@@ -759,7 +887,7 @@ Context.prototype.F = resolveFileUrl;
  */ process.env.TURBOPACK = '1';
 const url = require('url');
 const moduleFactories = new Map();
-const moduleCache = Object.create(null);
+const moduleCache = new Map();
 /**
  * Returns an absolute path to the given module's id.
  */ function resolvePathFromModule(moduleId) {
@@ -888,7 +1016,7 @@ function instantiateModule(id, sourceType, sourceData) {
     }
     const module1 = createModuleWithDirection(id);
     const exports = module1.exports;
-    moduleCache[id] = module1;
+    moduleCache.set(id, module1);
     const context = new Context(module1, exports);
     // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
     try {
@@ -909,7 +1037,7 @@ function instantiateModule(id, sourceType, sourceData) {
  * Retrieves a module from the cache, or instantiate it if it is not cached.
  */ // @ts-ignore
 function getOrInstantiateModuleFromParent(id, sourceModule) {
-    const module1 = moduleCache[id];
+    const module1 = moduleCache.get(id);
     if (module1) {
         if (module1.error) {
             throw module1.error;
@@ -927,7 +1055,7 @@ function getOrInstantiateModuleFromParent(id, sourceModule) {
  * Retrieves a module from the cache, or instantiate it as a runtime module if it is not cached.
  */ // @ts-ignore TypeScript doesn't separate this module space from the browser runtime
 function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
-    const module1 = moduleCache[moduleId];
+    const module1 = moduleCache.get(moduleId);
     if (module1) {
         if (module1.error) {
             throw module1.error;
@@ -946,129 +1074,172 @@ module.exports = (sourcePath)=>({
 
   function requireChunk(chunkPath) {
     switch(chunkPath) {
-      case "server/chunks/ssr/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap.js");
-      case "server/chunks/ssr/[root-of-the-server]__0gy-omw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0gy-omw._.js");
-      case "server/chunks/ssr/[root-of-the-server]__0peswme._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0peswme._.js");
-      case "server/chunks/ssr/[root-of-the-server]__0r8rlt0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0r8rlt0._.js");
-      case "server/chunks/ssr/[root-of-the-server]__12u481u._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__12u481u._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1a3woij._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1a3woij._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1oeo73p._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1oeo73p._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1t27v28._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1t27v28._.js");
+      case "server/chunks/ssr/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap3ph7h4.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap3ph7h4.js");
+      case "server/chunks/ssr/[root-of-the-server]__01hxnub5wigh9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__01hxnub5wigh9._.js");
+      case "server/chunks/ssr/[root-of-the-server]__036zs-5_yuyxb._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__036zs-5_yuyxb._.js");
+      case "server/chunks/ssr/[root-of-the-server]__0vo4mv9pkupmb._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0vo4mv9pkupmb._.js");
+      case "server/chunks/ssr/[root-of-the-server]__1-024fzwr6oky._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1-024fzwr6oky._.js");
+      case "server/chunks/ssr/[root-of-the-server]__1iyqv2-0i7e-z._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1iyqv2-0i7e-z._.js");
+      case "server/chunks/ssr/[root-of-the-server]__1nawy140npzf2._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1nawy140npzf2._.js");
       case "server/chunks/ssr/[turbopack]_runtime.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[turbopack]_runtime.js");
-      case "server/chunks/ssr/_0jnl0it._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0jnl0it._.js");
-      case "server/chunks/ssr/_150c87a._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_150c87a._.js");
-      case "server/chunks/ssr/_1ckhhp5._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1ckhhp5._.js");
-      case "server/chunks/ssr/_1ngnutf._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1ngnutf._.js");
-      case "server/chunks/ssr/_next-internal_server_app__not-found_page_actions_0pt47yr.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app__not-found_page_actions_0pt47yr.js");
-      case "server/chunks/ssr/components_layout_app-shell_tsx_1bz-c88._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_layout_app-shell_tsx_1bz-c88._.js");
-      case "server/chunks/ssr/node_modules_02tyy1b._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_02tyy1b._.js");
-      case "server/chunks/ssr/node_modules_0h91jdk._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_0h91jdk._.js");
-      case "server/chunks/ssr/node_modules_1uv0i4e._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_1uv0i4e._.js");
-      case "server/chunks/ssr/node_modules_next_0x3i8za._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_0x3i8za._.js");
-      case "server/chunks/ssr/node_modules_next_dist_0kq7z60._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_0kq7z60._.js");
-      case "server/chunks/ssr/node_modules_next_dist_1n3w9lb._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_1n3w9lb._.js");
-      case "server/chunks/ssr/node_modules_next_dist_1v8aef8._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_1v8aef8._.js");
-      case "server/chunks/ssr/node_modules_next_dist_client_components_0wpq8j3._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_0wpq8j3._.js");
-      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_forbidden_0symwr9.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_forbidden_0symwr9.js");
-      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_unauthorized_0l_sp0x.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_unauthorized_0l_sp0x.js");
-      case "server/chunks/ssr/[root-of-the-server]__0536gjx._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0536gjx._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1io3bae._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1io3bae._.js");
-      case "server/chunks/ssr/_next-internal_server_app__global-error_page_actions_0zi5s8-.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app__global-error_page_actions_0zi5s8-.js");
-      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_global-error_0q-w892.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_global-error_0q-w892.js");
-      case "server/chunks/ssr/[root-of-the-server]__0ot_4c0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0ot_4c0._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_analytics_page_actions_0ouoca5.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_analytics_page_actions_0ouoca5.js");
-      case "server/chunks/ssr/app_admin_analytics_page_tsx_0e3neox._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_analytics_page_tsx_0e3neox._.js");
-      case "server/chunks/ssr/[root-of-the-server]__0wdk26d._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0wdk26d._.js");
-      case "server/chunks/ssr/_05qfgyc._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_05qfgyc._.js");
-      case "server/chunks/ssr/_1sz-5y9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1sz-5y9._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_communities_page_actions_0pefqgn.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_communities_page_actions_0pefqgn.js");
-      case "server/chunks/ssr/app_admin_communities_page_tsx_05-hyh0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_communities_page_tsx_05-hyh0._.js");
-      case "server/chunks/ssr/components_ui_select_tsx_0-2ez5x._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_ui_select_tsx_0-2ez5x._.js");
-      case "server/chunks/ssr/node_modules_1nntt_x._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_1nntt_x._.js");
-      case "server/chunks/[root-of-the-server]__00fkdqg._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__00fkdqg._.js");
-      case "server/chunks/[root-of-the-server]__0l3yhx4._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__0l3yhx4._.js");
+      case "server/chunks/ssr/_0hfzuku3md0vw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0hfzuku3md0vw._.js");
+      case "server/chunks/ssr/_15z4rrdmhvlwk._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_15z4rrdmhvlwk._.js");
+      case "server/chunks/ssr/_1ckhhp54wp_vp._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1ckhhp54wp_vp._.js");
+      case "server/chunks/ssr/_next-internal_server_app__not-found_page_actions_0pt47yrisjoev.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app__not-found_page_actions_0pt47yrisjoev.js");
+      case "server/chunks/ssr/components_AuthContext_tsx_1i_fasgv5nlpi._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_AuthContext_tsx_1i_fasgv5nlpi._.js");
+      case "server/chunks/ssr/components_layout_app-shell_tsx_1bz-c88auias0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_layout_app-shell_tsx_1bz-c88auias0._.js");
+      case "server/chunks/ssr/lib_mockData_ts_0xg1-2pwn1opv._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/lib_mockData_ts_0xg1-2pwn1opv._.js");
+      case "server/chunks/ssr/node_modules_05sw6ck0ruvg3._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_05sw6ck0ruvg3._.js");
+      case "server/chunks/ssr/node_modules_0h91jdk0pr40d._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_0h91jdk0pr40d._.js");
+      case "server/chunks/ssr/node_modules_1t--2tnk-xy6t._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_1t--2tnk-xy6t._.js");
+      case "server/chunks/ssr/node_modules_@base-ui_0h1vi1xxsy9jt._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_@base-ui_0h1vi1xxsy9jt._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_1lhp7ljl_htpv._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_1lhp7ljl_htpv._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_Icon_mjs_0lly-em28afbk._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_Icon_mjs_0lly-em28afbk._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1_8vs3fbvqi0s._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1_8vs3fbvqi0s._.js");
+      case "server/chunks/ssr/node_modules_next_19misn5bvv8e7._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_19misn5bvv8e7._.js");
+      case "server/chunks/ssr/node_modules_next_dist_0-amwqbrge23p._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_0-amwqbrge23p._.js");
+      case "server/chunks/ssr/node_modules_next_dist_1khq67j4vo9y4._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_1khq67j4vo9y4._.js");
+      case "server/chunks/ssr/node_modules_next_dist_20w9fuchy6ao8._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_20w9fuchy6ao8._.js");
+      case "server/chunks/ssr/node_modules_next_dist_client_components_0wpq8j32_ibz4._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_0wpq8j32_ibz4._.js");
+      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_forbidden_0symwr9mbf-fh.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_forbidden_0symwr9mbf-fh.js");
+      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_unauthorized_0l_sp0xky89qu.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_unauthorized_0l_sp0xky89qu.js");
+      case "server/chunks/ssr/node_modules_next_dist_compiled_16tqnelc93e3o._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_compiled_16tqnelc93e3o._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0vi2ed10sbiif.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0vi2ed10sbiif.js");
+      case "server/chunks/ssr/[root-of-the-server]__0py1t7q9ntzgc._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0py1t7q9ntzgc._.js");
+      case "server/chunks/ssr/[root-of-the-server]__16cw6hlz8ukmj._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__16cw6hlz8ukmj._.js");
+      case "server/chunks/ssr/[root-of-the-server]__1gk-wivx965fr._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1gk-wivx965fr._.js");
+      case "server/chunks/ssr/_next-internal_server_app__global-error_page_actions_0zi5s8-psc_d2.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app__global-error_page_actions_0zi5s8-psc_d2.js");
+      case "server/chunks/ssr/node_modules_0gxlxpuufujz9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_0gxlxpuufujz9._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_19--w_z4y02i7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_19--w_z4y02i7.js");
+      case "server/chunks/ssr/[root-of-the-server]__0jz70w_zmz47o._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0jz70w_zmz47o._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_analytics_page_actions_0ouoca50a0cl4.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_analytics_page_actions_0ouoca50a0cl4.js");
+      case "server/chunks/ssr/app_admin_analytics_page_tsx_0e3neox2kjtqc._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_analytics_page_tsx_0e3neox2kjtqc._.js");
+      case "server/chunks/ssr/node_modules_next_dist_client_components_builtin_global-error_0q-w892nagajq.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_client_components_builtin_global-error_0q-w892nagajq.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0jdckfhsst82w.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0jdckfhsst82w.js");
+      case "server/chunks/ssr/[root-of-the-server]__0sx201lg0oxyw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0sx201lg0oxyw._.js");
+      case "server/chunks/ssr/_0_d-2opcjho3s._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0_d-2opcjho3s._.js");
+      case "server/chunks/ssr/_0i2x2ttl631s1._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0i2x2ttl631s1._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_communities_page_actions_0pefqgn9byg-y.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_communities_page_actions_0pefqgn9byg-y.js");
+      case "server/chunks/ssr/app_admin_communities_page_tsx_05-hyh05vbr9a._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_communities_page_tsx_05-hyh05vbr9a._.js");
+      case "server/chunks/ssr/components_ui_select_tsx_0-2ez5x_oq45u._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_ui_select_tsx_0-2ez5x_oq45u._.js");
+      case "server/chunks/ssr/node_modules_0l7uysthld2sd._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_0l7uysthld2sd._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_0r_-agg2czs48._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_0r_-agg2czs48._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_08ma4vmhrxw8_.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_08ma4vmhrxw8_.js");
+      case "server/chunks/1oeh_server_app_admin_communities_routes_[id]_route_actions_14vgtbp8zzyuw.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/1oeh_server_app_admin_communities_routes_[id]_route_actions_14vgtbp8zzyuw.js");
+      case "server/chunks/[root-of-the-server]__1o2krift5l7is._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__1o2krift5l7is._.js");
+      case "server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js");
       case "server/chunks/[turbopack]_runtime.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[turbopack]_runtime.js");
-      case "server/chunks/_next-internal_server_app_admin_communities_routes_[id]_route_actions_14vgtbp.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_communities_routes_[id]_route_actions_14vgtbp.js");
-      case "server/chunks/[root-of-the-server]__1sbhca9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__1sbhca9._.js");
-      case "server/chunks/_next-internal_server_app_admin_communities_routes_route_actions_0a_prjw.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_communities_routes_route_actions_0a_prjw.js");
-      case "server/chunks/ssr/[root-of-the-server]__1du-rv2._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1du-rv2._.js");
-      case "server/chunks/ssr/_1l4tmit._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1l4tmit._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_moderation_page_actions_13d-uv7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_moderation_page_actions_13d-uv7.js");
-      case "server/chunks/ssr/app_admin_moderation_page_tsx_1ld96-n._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_moderation_page_tsx_1ld96-n._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1m5bmi5._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1m5bmi5._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_page_actions_1mcickz.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_page_actions_1mcickz.js");
-      case "server/chunks/ssr/app_admin_page_tsx_1iybnbw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_page_tsx_1iybnbw._.js");
-      case "server/chunks/ssr/[root-of-the-server]__06biusg._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__06biusg._.js");
-      case "server/chunks/ssr/_12badgv._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_12badgv._.js");
-      case "server/chunks/ssr/_145ehpz._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_145ehpz._.js");
-      case "server/chunks/ssr/_1l--msr._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1l--msr._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_settings_page_actions_1roqeui.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_settings_page_actions_1roqeui.js");
-      case "server/chunks/ssr/app_admin_settings_page_tsx_1h8c064._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_settings_page_tsx_1h8c064._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1lxg462._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1lxg462._.js");
-      case "server/chunks/ssr/_12mwv72._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_12mwv72._.js");
-      case "server/chunks/ssr/_1bklzh3._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1bklzh3._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_system_page_actions_0j2_k7x.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_system_page_actions_0j2_k7x.js");
-      case "server/chunks/ssr/app_admin_system_page_tsx_1c1pma-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_system_page_tsx_1c1pma-._.js");
-      case "server/chunks/ssr/node_modules_1zin4kj._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_1zin4kj._.js");
-      case "server/chunks/[root-of-the-server]__0-uuqwj._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__0-uuqwj._.js");
-      case "server/chunks/_next-internal_server_app_admin_user_routes_[id]_route_actions_0e8bkv0.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_user_routes_[id]_route_actions_0e8bkv0.js");
-      case "server/chunks/[root-of-the-server]__05gyk88._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__05gyk88._.js");
-      case "server/chunks/_next-internal_server_app_admin_user_routes_route_actions_0saagh6.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_user_routes_route_actions_0saagh6.js");
-      case "server/chunks/ssr/[root-of-the-server]__1dwc11x._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1dwc11x._.js");
-      case "server/chunks/ssr/_next-internal_server_app_admin_users_page_actions_1j4t7lq.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_users_page_actions_1j4t7lq.js");
-      case "server/chunks/ssr/app_admin_users_page_tsx_0o0pugm._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_users_page_tsx_0o0pugm._.js");
-      case "server/chunks/[root-of-the-server]__1rz-au3._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__1rz-au3._.js");
-      case "server/chunks/_next-internal_server_app_api_reports_[id]_route_actions_0vpqicg.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_api_reports_[id]_route_actions_0vpqicg.js");
-      case "server/chunks/[root-of-the-server]__1zj0waq._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__1zj0waq._.js");
-      case "server/chunks/_next-internal_server_app_api_reports_route_actions_1tb2qeh.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_api_reports_route_actions_1tb2qeh.js");
-      case "server/chunks/ssr/[root-of-the-server]__034s3br._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__034s3br._.js");
-      case "server/chunks/ssr/_next-internal_server_app_c_[slug]_mod_page_actions_1mcj4qw.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_c_[slug]_mod_page_actions_1mcj4qw.js");
-      case "server/chunks/ssr/[root-of-the-server]__12gmhwz._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__12gmhwz._.js");
-      case "server/chunks/ssr/_01odgks._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_01odgks._.js");
-      case "server/chunks/ssr/_121p2r7._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_121p2r7._.js");
-      case "server/chunks/ssr/_next-internal_server_app_c_[slug]_page_actions_11oqlu7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_c_[slug]_page_actions_11oqlu7.js");
-      case "server/chunks/ssr/app_features_feed_components_FeedStream_tsx_076wndo._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_feed_components_FeedStream_tsx_076wndo._.js");
-      case "server/chunks/ssr/app_features_feed_mockData_ts_0mf0_li._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_feed_mockData_ts_0mf0_li._.js");
-      case "server/chunks/ssr/[root-of-the-server]__0t-122h._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0t-122h._.js");
-      case "server/chunks/ssr/_20_ikec._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_20_ikec._.js");
-      case "server/chunks/ssr/_next-internal_server_app_communities_page_actions_1p_bi3u.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_communities_page_actions_1p_bi3u.js");
-      case "server/chunks/ssr/[root-of-the-server]__1blweki._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1blweki._.js");
-      case "server/chunks/ssr/_next-internal_server_app_explore_page_actions_1k049ni.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_explore_page_actions_1k049ni.js");
-      case "server/chunks/ssr/app_explore_page_tsx_110stgo._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_explore_page_tsx_110stgo._.js");
-      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1fbok3a._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1fbok3a._.js");
-      case "server/chunks/[externals]__1dp3s_i._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[externals]__1dp3s_i._.js");
-      case "server/chunks/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap.js");
-      case "server/chunks/_0zlvd-z._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_0zlvd-z._.js");
-      case "server/chunks/_next-internal_server_app_icon_route_actions_02gqvdz.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_icon_route_actions_02gqvdz.js");
-      case "server/chunks/ssr/[root-of-the-server]__0l5zbua._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0l5zbua._.js");
-      case "server/chunks/ssr/_0iim05x._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0iim05x._.js");
-      case "server/chunks/ssr/_0om2lx7._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0om2lx7._.js");
-      case "server/chunks/ssr/_next-internal_server_app_login_page_actions_04fnjo0.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_login_page_actions_04fnjo0.js");
-      case "server/chunks/ssr/[root-of-the-server]__07hl34u._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__07hl34u._.js");
-      case "server/chunks/ssr/_13p6b6u._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_13p6b6u._.js");
-      case "server/chunks/ssr/_next-internal_server_app_notifications_page_actions_13beffo.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_notifications_page_actions_13beffo.js");
-      case "server/chunks/ssr/[root-of-the-server]__1esgl1s._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1esgl1s._.js");
-      case "server/chunks/ssr/_07m0uso._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_07m0uso._.js");
-      case "server/chunks/ssr/_next-internal_server_app_page_actions_0hhsz1j.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_page_actions_0hhsz1j.js");
-      case "server/chunks/ssr/[root-of-the-server]__0g7e3_c._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0g7e3_c._.js");
-      case "server/chunks/ssr/_07imoiy._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_07imoiy._.js");
-      case "server/chunks/ssr/_0hsvl63._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0hsvl63._.js");
-      case "server/chunks/ssr/_next-internal_server_app_post_page_actions_0-8pkfu.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_post_page_actions_0-8pkfu.js");
-      case "server/chunks/ssr/app_post_page_tsx_0nuu9-p._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_post_page_tsx_0nuu9-p._.js");
-      case "server/chunks/ssr/[root-of-the-server]__1nxvlrm._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1nxvlrm._.js");
-      case "server/chunks/ssr/_next-internal_server_app_privacy_page_actions_0_hxzrk.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_privacy_page_actions_0_hxzrk.js");
-      case "server/chunks/ssr/[root-of-the-server]__07--ihz._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__07--ihz._.js");
-      case "server/chunks/ssr/_1iacyyg._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1iacyyg._.js");
-      case "server/chunks/ssr/_next-internal_server_app_profile_[username]_page_actions_1f99lvt.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_profile_[username]_page_actions_1f99lvt.js");
-      case "server/chunks/ssr/app_features_profile_components_ProfileView_tsx_1nd3b33._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_profile_components_ProfileView_tsx_1nd3b33._.js");
-      case "server/chunks/ssr/app_features_profile_mockApi_ts_03_ew15._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_profile_mockApi_ts_03_ew15._.js");
-      case "server/chunks/ssr/[root-of-the-server]__0fn16e4._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0fn16e4._.js");
-      case "server/chunks/ssr/_0bt44oe._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0bt44oe._.js");
-      case "server/chunks/ssr/_next-internal_server_app_register_page_actions_1op-s-x.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_register_page_actions_1op-s-x.js");
-      case "server/chunks/ssr/[root-of-the-server]__0ze-le0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0ze-le0._.js");
-      case "server/chunks/ssr/_next-internal_server_app_rules_page_actions_1klva6x.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_rules_page_actions_1klva6x.js");
-      case "server/chunks/ssr/[root-of-the-server]__18vg6rw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__18vg6rw._.js");
-      case "server/chunks/ssr/_next-internal_server_app_terms_page_actions_0h-0lt4.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_terms_page_actions_0h-0lt4.js");
+      case "server/chunks/_0qqeaxyjcnkqg._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_0qqeaxyjcnkqg._.js");
+      case "server/chunks/_18ctoakt9m07l._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_18ctoakt9m07l._.js");
+      case "server/chunks/_next-internal_server_app_admin_communities_routes_route_actions_0a_prjwwh6oga.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_communities_routes_route_actions_0a_prjwwh6oga.js");
+      case "server/chunks/ssr/[root-of-the-server]__05hqc7sw3d79s._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__05hqc7sw3d79s._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_moderation_page_actions_13d-uv7lm6uc6.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_moderation_page_actions_13d-uv7lm6uc6.js");
+      case "server/chunks/ssr/app_admin_moderation_page_tsx_1ld96-n8bm64k._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_moderation_page_tsx_1ld96-n8bm64k._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_0ftrvgi0ak9ek._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_0ftrvgi0ak9ek._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1tmqc6jqjk4y6.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1tmqc6jqjk4y6.js");
+      case "server/chunks/ssr/[root-of-the-server]__1i2pma2wfackn._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1i2pma2wfackn._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_page_actions_1mcickzfofbmo.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_page_actions_1mcickzfofbmo.js");
+      case "server/chunks/ssr/app_admin_page_tsx_1iybnbwa__8la._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_page_tsx_1iybnbwa__8la._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0zm5wrvnhv_xs.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0zm5wrvnhv_xs.js");
+      case "server/chunks/ssr/[root-of-the-server]__0a40rqgot3--v._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0a40rqgot3--v._.js");
+      case "server/chunks/ssr/_0-q8242754nwy._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0-q8242754nwy._.js");
+      case "server/chunks/ssr/_06tt01v4ddpri._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_06tt01v4ddpri._.js");
+      case "server/chunks/ssr/_12badgvudr8l3._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_12badgvudr8l3._.js");
+      case "server/chunks/ssr/_1v2yw4ngy8a5h._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1v2yw4ngy8a5h._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_settings_page_actions_1roqeui1r_uo_.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_settings_page_actions_1roqeui1r_uo_.js");
+      case "server/chunks/ssr/app_admin_settings_page_tsx_1h8c064-55jot._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_settings_page_tsx_1h8c064-55jot._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1mlpg-2rfe6v-.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1mlpg-2rfe6v-.js");
+      case "server/chunks/ssr/[root-of-the-server]__0eibsg24tfiit._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0eibsg24tfiit._.js");
+      case "server/chunks/ssr/_0o_pvyqbbk1l0._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0o_pvyqbbk1l0._.js");
+      case "server/chunks/ssr/_12mwv72s77pxd._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_12mwv72s77pxd._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_system_page_actions_0j2_k7xkn7m3f.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_system_page_actions_0j2_k7xkn7m3f.js");
+      case "server/chunks/ssr/app_admin_system_page_tsx_1c1pma-511b62._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_system_page_tsx_1c1pma-511b62._.js");
+      case "server/chunks/ssr/node_modules_141_f_0d_rksi._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_141_f_0d_rksi._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1d3pg06whf4_l.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1d3pg06whf4_l.js");
+      case "server/chunks/[root-of-the-server]__0h6-rhbuu0poi._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[root-of-the-server]__0h6-rhbuu0poi._.js");
+      case "server/chunks/_17uy8co9bnanw._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_17uy8co9bnanw._.js");
+      case "server/chunks/_next-internal_server_app_admin_user_routes_[id]_route_actions_0e8bkv0p513zp.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_user_routes_[id]_route_actions_0e8bkv0p513zp.js");
+      case "server/chunks/_0k-m0gotari9n._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_0k-m0gotari9n._.js");
+      case "server/chunks/_next-internal_server_app_admin_user_routes_route_actions_0saagh62vrqv0.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_admin_user_routes_route_actions_0saagh62vrqv0.js");
+      case "server/chunks/ssr/[root-of-the-server]__0so-uut1va0f9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0so-uut1va0f9._.js");
+      case "server/chunks/ssr/_next-internal_server_app_admin_users_page_actions_1j4t7lqq209r8.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_admin_users_page_actions_1j4t7lqq209r8.js");
+      case "server/chunks/ssr/app_admin_users_page_tsx_0o0pugm0_hzv4._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_admin_users_page_tsx_0o0pugm0_hzv4._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1g3mt2s7wsgy7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1g3mt2s7wsgy7.js");
+      case "server/chunks/[externals]__18og1f9d5crv-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[externals]__18og1f9d5crv-._.js");
+      case "server/chunks/_1lgdrhplsjk6g._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_1lgdrhplsjk6g._.js");
+      case "server/chunks/_next-internal_server_app_api_reports_[id]_route_actions_0vpqicglzncf8.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_api_reports_[id]_route_actions_0vpqicglzncf8.js");
+      case "server/chunks/lib_queue-store_ts_0v_076y9ss9vz._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/lib_queue-store_ts_0v_076y9ss9vz._.js");
+      case "server/chunks/_1t-ihvvg2ulsf._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_1t-ihvvg2ulsf._.js");
+      case "server/chunks/_next-internal_server_app_api_reports_route_actions_1tb2qehgnpl3x.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_api_reports_route_actions_1tb2qehgnpl3x.js");
+      case "server/chunks/ssr/[root-of-the-server]__1ik0bw_cb7uso._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1ik0bw_cb7uso._.js");
+      case "server/chunks/ssr/_07eilhjkb878p._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_07eilhjkb878p._.js");
+      case "server/chunks/ssr/_next-internal_server_app_c_[slug]_mod_page_actions_1mcj4qwl-bzh0.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_c_[slug]_mod_page_actions_1mcj4qwl-bzh0.js");
+      case "server/chunks/ssr/app_c_[slug]_mod_page_tsx_1cw74kh781ayn._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_c_[slug]_mod_page_tsx_1cw74kh781ayn._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1r99mdux62at9.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1r99mdux62at9.js");
+      case "server/chunks/ssr/[root-of-the-server]__00oggsqbotvrx._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__00oggsqbotvrx._.js");
+      case "server/chunks/ssr/_01odgksnx1p-u._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_01odgksnx1p-u._.js");
+      case "server/chunks/ssr/_1rm_fpz0-fx2g._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1rm_fpz0-fx2g._.js");
+      case "server/chunks/ssr/_next-internal_server_app_c_[slug]_page_actions_11oqlu7ssqczz.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_c_[slug]_page_actions_11oqlu7ssqczz.js");
+      case "server/chunks/ssr/app_c_[slug]_CommunityView_tsx_1cwa5fx6n4s4m._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_c_[slug]_CommunityView_tsx_1cwa5fx6n4s4m._.js");
+      case "server/chunks/ssr/app_features_feed_components_FeedStream_tsx_076wndoo7hpv-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_feed_components_FeedStream_tsx_076wndoo7hpv-._.js");
+      case "server/chunks/ssr/app_features_feed_mockData_ts_0mf0_li8cqr2r._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_feed_mockData_ts_0mf0_li8cqr2r._.js");
+      case "server/chunks/ssr/lib_communities_ts_0c_ft1ttnqgde._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/lib_communities_ts_0c_ft1ttnqgde._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_04dh7mv_5j_ew.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_04dh7mv_5j_ew.js");
+      case "server/chunks/ssr/[root-of-the-server]__06qmk6afng6xl._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__06qmk6afng6xl._.js");
+      case "server/chunks/ssr/_next-internal_server_app_communities_page_actions_1p_bi3u0evq0q.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_communities_page_actions_1p_bi3u0evq0q.js");
+      case "server/chunks/ssr/app_communities_CommunitiesView_tsx_1s2osea83287-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_communities_CommunitiesView_tsx_1s2osea83287-._.js");
+      case "server/chunks/ssr/lib_useJoinedCommunities_ts_0q9mt2aj5thcv._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/lib_useJoinedCommunities_ts_0q9mt2aj5thcv._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1s4sv-te2isqb.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1s4sv-te2isqb.js");
+      case "server/chunks/ssr/[root-of-the-server]__0vco54t-du-1s._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0vco54t-du-1s._.js");
+      case "server/chunks/ssr/_next-internal_server_app_explore_page_actions_1k049ni2b-pqc.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_explore_page_actions_1k049ni2b-pqc.js");
+      case "server/chunks/ssr/app_explore_page_tsx_110stgo-rksu-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_explore_page_tsx_110stgo-rksu-._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1fbok3a0bz4hc._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1fbok3a0bz4hc._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0et126sbktknc.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0et126sbktknc.js");
+      case "server/chunks/[externals]__0soryt0v7nc88._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[externals]__0soryt0v7nc88._.js");
+      case "server/chunks/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap3ph7h4.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/[externals]_next_dist_compiled_@vercel_og_index_node_01np1ap3ph7h4.js");
+      case "server/chunks/_0zlvd-zugtngf._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_0zlvd-zugtngf._.js");
+      case "server/chunks/_next-internal_server_app_icon_route_actions_02gqvdzjzg4nq.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/_next-internal_server_app_icon_route_actions_02gqvdzjzg4nq.js");
+      case "server/chunks/ssr/[root-of-the-server]__0-py_9cdonld-._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0-py_9cdonld-._.js");
+      case "server/chunks/ssr/_0fqnpywubcqfc._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_0fqnpywubcqfc._.js");
+      case "server/chunks/ssr/_next-internal_server_app_login_page_actions_04fnjo0ny9dmg.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_login_page_actions_04fnjo0ny9dmg.js");
+      case "server/chunks/ssr/app_login_page_tsx_1nv--5q3z1qp9._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_login_page_tsx_1nv--5q3z1qp9._.js");
+      case "server/chunks/ssr/components_ui_label_tsx_0drwxszjdjxli._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/components_ui_label_tsx_0drwxszjdjxli._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1zdqjowmqqk-6.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1zdqjowmqqk-6.js");
+      case "server/chunks/ssr/[root-of-the-server]__0_9mj6xcm1v0m._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__0_9mj6xcm1v0m._.js");
+      case "server/chunks/ssr/_next-internal_server_app_notifications_page_actions_13beffoxnkclu.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_notifications_page_actions_13beffoxnkclu.js");
+      case "server/chunks/ssr/app_notifications_page_tsx_0426h6ddz6u9r._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_notifications_page_tsx_0426h6ddz6u9r._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_sparkles_mjs_19q9uhn6ux_tq._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_sparkles_mjs_19q9uhn6ux_tq._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_03y2yl-u-9dod.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_03y2yl-u-9dod.js");
+      case "server/chunks/ssr/[root-of-the-server]__1e5r5by0qj3ic._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1e5r5by0qj3ic._.js");
+      case "server/chunks/ssr/_07m0usocsj78v._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_07m0usocsj78v._.js");
+      case "server/chunks/ssr/_next-internal_server_app_page_actions_0hhsz1jew5ls7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_page_actions_0hhsz1jew5ls7.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_12eg0822cc8gr.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_12eg0822cc8gr.js");
+      case "server/chunks/ssr/[root-of-the-server]__1h2ccir5ml9ap._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1h2ccir5ml9ap._.js");
+      case "server/chunks/ssr/_07imoiyv-p_vq._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_07imoiyv-p_vq._.js");
+      case "server/chunks/ssr/_next-internal_server_app_post_page_actions_0-8pkfutso8cn.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_post_page_actions_0-8pkfutso8cn.js");
+      case "server/chunks/ssr/app_post_page_tsx_0nuu9-p2sa7wm._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_post_page_tsx_0nuu9-p2sa7wm._.js");
+      case "server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1me533-lo7nfq._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_lucide-react_dist_esm_icons_1me533-lo7nfq._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0bzqo4de26waq.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0bzqo4de26waq.js");
+      case "server/chunks/ssr/[root-of-the-server]__147kp4wr579af._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__147kp4wr579af._.js");
+      case "server/chunks/ssr/_next-internal_server_app_privacy_page_actions_0_hxzrkksgwdo.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_privacy_page_actions_0_hxzrkksgwdo.js");
+      case "server/chunks/ssr/app_privacy_page_tsx_0qi_zukw0qonm._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_privacy_page_tsx_0qi_zukw0qonm._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0_99dvyldr4qs.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0_99dvyldr4qs.js");
+      case "server/chunks/ssr/_1z0cjy49_nppl._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_1z0cjy49_nppl._.js");
+      case "server/chunks/ssr/_next-internal_server_app_profile_[username]_page_actions_1f99lvt3u9kfq.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_profile_[username]_page_actions_1f99lvt3u9kfq.js");
+      case "server/chunks/ssr/app_0gpgc_rkigt3a._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_0gpgc_rkigt3a._.js");
+      case "server/chunks/ssr/app_features_profile_components_ProfileView_tsx_1nd3b33rq_fnf._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_profile_components_ProfileView_tsx_1nd3b33rq_fnf._.js");
+      case "server/chunks/ssr/app_features_profile_mockApi_ts_03_ew15s3ysp8._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_features_profile_mockApi_ts_03_ew15s3ysp8._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1lrxevz85ja3s.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1lrxevz85ja3s.js");
+      case "server/chunks/ssr/[root-of-the-server]__1nhejoh3inna2._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/[root-of-the-server]__1nhejoh3inna2._.js");
+      case "server/chunks/ssr/_next-internal_server_app_register_page_actions_1op-s-xpplkgy.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_register_page_actions_1op-s-xpplkgy.js");
+      case "server/chunks/ssr/app_register_page_tsx_0f5di0bg1iepk._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_register_page_tsx_0f5di0bg1iepk._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1_f1wktqy-p--.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1_f1wktqy-p--.js");
+      case "server/chunks/ssr/_next-internal_server_app_rules_page_actions_1klva6x7-k35g.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_rules_page_actions_1klva6x7-k35g.js");
+      case "server/chunks/ssr/app_rules_page_tsx_03z_u_gqq7_gn._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_rules_page_tsx_03z_u_gqq7_gn._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0bffw-yi9gqz7.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_0bffw-yi9gqz7.js");
+      case "server/chunks/ssr/_next-internal_server_app_terms_page_actions_0h-0lt4mmfgq3.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/_next-internal_server_app_terms_page_actions_0h-0lt4mmfgq3.js");
+      case "server/chunks/ssr/app_terms_page_tsx_03a89p00ocftm._.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/app_terms_page_tsx_03a89p00ocftm._.js");
+      case "server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1okaiwxiy6912.js": return require("/home/jiban-neupane/Frustrated-box-monorepo/frustrated_box_web/.open-next/server-functions/default/.next/server/chunks/ssr/node_modules_next_dist_esm_build_templates_app-page_1okaiwxiy6912.js");
       default:
         throw new Error(`Not found ${chunkPath}`);
     }

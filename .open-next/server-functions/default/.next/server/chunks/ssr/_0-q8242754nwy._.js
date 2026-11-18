@@ -1,0 +1,3 @@
+module.exports=[17171,a=>{"use strict";var b=a.i(87924),c=a.i(13983);a.s(["f",0,function({className:a,...d}){return(0,b.jsx)("label",{"data-slot":"label",className:(0,c.f)("flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",a),...d})}])},2589,a=>{"use strict";var b=a.i(64831);let c={name:"check",size:24,node:[["path",{d:"M20 6 9 17l-5-5",key:"1gmf2c"}]]};c.node;let d=(0,b.f)(c);a.s(["f",0,d])},52562,a=>{"use strict";var b=a.i(2589);a.s(["f",()=>b.f])}];
+
+//# sourceMappingURL=_0-q8242754nwy._.js.map

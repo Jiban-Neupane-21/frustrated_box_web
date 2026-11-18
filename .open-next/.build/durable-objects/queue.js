@@ -1,4 +1,4 @@
-globalThis.openNextDebug = false;globalThis.openNextVersion = "4.1.16";globalThis.nextVersion = "16.3.7";
+globalThis.openNextDebug = false;globalThis.openNextVersion = "4.1.16";globalThis.nextVersion = "16.4.6";
 
 // node_modules/@opennextjs/aws/dist/utils/error.js
 var IgnorableError = class extends Error {
@@ -295,7 +295,7 @@ var DOQueueHandler = class extends DurableObject {
           // We cannot use the deduplication id because it's not unique per route - every time a route is revalidated, the deduplication id is different.
           routeKey,
           revalidationStartSeconds,
-          "qrs-7IwsezxGkK2_3VS2N"
+          "HQ_4gO12wS4nsB7UYJNmV"
         );
       }
       this.removeFromFailedState(msg.MessageDeduplicationId);
@@ -351,7 +351,7 @@ var DOQueueHandler = class extends DurableObject {
     }
     this.routeInFailedState.set(msg.MessageDeduplicationId, updatedFailedState);
     if (!this.disableSQLite) {
-      this.sql.exec("INSERT OR REPLACE INTO failed_state (id, data, buildId) VALUES (?, ?, ?)", msg.MessageDeduplicationId, JSON.stringify(updatedFailedState), "qrs-7IwsezxGkK2_3VS2N");
+      this.sql.exec("INSERT OR REPLACE INTO failed_state (id, data, buildId) VALUES (?, ?, ?)", msg.MessageDeduplicationId, JSON.stringify(updatedFailedState), "HQ_4gO12wS4nsB7UYJNmV");
     }
     await this.addAlarm();
   }
@@ -405,8 +405,8 @@ var DOQueueHandler = class extends DurableObject {
       return;
     this.sql.exec("CREATE TABLE IF NOT EXISTS failed_state (id TEXT PRIMARY KEY, data TEXT, buildId TEXT)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS sync (id TEXT PRIMARY KEY, lastSuccess INTEGER, buildId TEXT)");
-    this.sql.exec("DELETE FROM failed_state WHERE buildId != ?", "qrs-7IwsezxGkK2_3VS2N");
-    this.sql.exec("DELETE FROM sync WHERE buildId != ?", "qrs-7IwsezxGkK2_3VS2N");
+    this.sql.exec("DELETE FROM failed_state WHERE buildId != ?", "HQ_4gO12wS4nsB7UYJNmV");
+    this.sql.exec("DELETE FROM sync WHERE buildId != ?", "HQ_4gO12wS4nsB7UYJNmV");
     const failedStateCursor = this.sql.exec("SELECT * FROM failed_state");
     for (const row of failedStateCursor) {
       this.routeInFailedState.set(row.id, JSON.parse(row.data));

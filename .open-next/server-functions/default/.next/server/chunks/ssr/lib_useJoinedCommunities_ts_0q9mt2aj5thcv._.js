@@ -1,0 +1,3 @@
+module.exports=[26017,a=>{"use strict";var b=a.i(72131),c=a.i(81353);a.s(["f",0,function(){let[a,d]=(0,b.useState)([]);(0,b.useEffect)(()=>{let a=()=>d(c.j.getJoinedSlugs());return a(),window.addEventListener(c.s,a),window.addEventListener("storage",a),()=>{window.removeEventListener(c.s,a),window.removeEventListener("storage",a)}},[]);let e=(0,b.useCallback)(b=>a.includes(b),[a]);return{joined:a,isJoined:e,toggle:(0,b.useCallback)(a=>c.j.toggleJoin(a),[])}}])}];
+
+//# sourceMappingURL=lib_useJoinedCommunities_ts_0q9mt2aj5thcv._.js.map
