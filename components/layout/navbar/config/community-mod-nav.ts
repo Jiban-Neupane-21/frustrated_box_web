@@ -4,6 +4,7 @@ import {
   Users,
   Settings,
   ScrollText,
+  FileText,
 } from "lucide-react";
 import { NavLinkItem } from "@/components/layout/navbar/types";
 
@@ -24,6 +25,12 @@ export const getCommunityModNavLinks = (
     href: `/c/${slug}/mod`,
     icon: LayoutDashboard,
   },
+    {
+  id: "posts",
+  label: "Posts",
+  href: `/c/${slug}/mod/posts`,
+  icon: FileText, 
+},
   {
     id: "queue",
     label: "Mod Queue",
