@@ -10,6 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Build & Deploy to Workers
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,9 +28,9 @@ jobs:
         id: env-vars
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "api_url=${{ secrets.NEXT_PUBLIC_API_URL || '' }}" >> $GITHUB_OUTPUT
+            echo "api_url=${{ secrets.NEXT_PUBLIC_API_URL || '' }}" >> "$GITHUB_OUTPUT"
           else
-            echo "api_url=${{ secrets.NEXT_PUBLIC_DEV_API_URL || secrets.NEXT_PUBLIC_API_URL || '' }}" >> $GITHUB_OUTPUT
+            echo "api_url=${{ secrets.NEXT_PUBLIC_DEV_API_URL || secrets.NEXT_PUBLIC_API_URL || '' }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build Next.js for Cloudflare Workers
@@ -43,7 +44,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            npm run deploy:cloudflare -- --name frustratedbox-web
+            npx wrangler deploy --name frustratedbox-web
           else
-            npm run deploy:cloudflare -- --name frustratedbox-web-${{ github.ref_name }}
+            npx wrangler deploy --name frustratedbox-web-develop
           fi

@@ -1,1 +1,0 @@
-self.__SSG_MANIFEST=new Set(["\u002Fc\u002F[slug]","\u002Fc\u002F[slug]\u002Fmod","\u002Fprofile\u002F[username]"]);self.__SSG_MANIFEST_CB&&self.__SSG_MANIFEST_CB()
